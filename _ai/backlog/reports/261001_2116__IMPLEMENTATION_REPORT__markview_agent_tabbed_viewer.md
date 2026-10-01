@@ -2,7 +2,7 @@
 filename: "_ai/backlog/reports/261001_2116__IMPLEMENTATION_REPORT__markview_agent_tabbed_viewer.md"
 title: "Report: docdeck — Tabbed Agent Document Monitor"
 createdAt: 2026-10-01 21:16
-updatedAt: 2026-10-01 22:40
+updatedAt: 2026-10-01 23:05
 planFile: "_ai/backlog/active/261001_2116__IMPLEMENTATION_PLAN__markview_agent_tabbed_viewer.md"
 project: "docdeck"
 status: completed
@@ -45,7 +45,9 @@ static checks could not have caught (see §5).
 | `src-tauri/src/watcher.rs` | Debounced watcher + watch registry (`WatcherState`) |
 | `src-tauri/src/commands.rs` | `load_file` / `close_file` commands, `FilePayload` |
 | `src-tauri/src/lib.rs` | Builder, single-instance IPC, `startup_paths` command |
+| `src-tauri/src/render.rs` | WebKit renderer configuration (DMA-BUF opt-out) |
 | `src-tauri/src/watcher_test.rs` | 4 unit tests for watch registry lifecycle |
+| `src-tauri/src/render_test.rs` | 8 unit tests for renderer opt-in precedence |
 | `scripts/simulate_agent_writes.sh` | End-to-end agent-write simulation harness |
 | `package.json` | npm manifest + `typecheck`/`test`/`lint:rs`/`simulate` scripts |
 | `vite.config.ts`, `tsconfig.json`, `package-lock.json`, `.vscode/` | Scaffold/tooling |
@@ -94,7 +96,7 @@ static checks could not have caught (see §5).
 | 6 | `marked` output used directly | Post-parse pass adds `task-list-item` | marked v18 emits no list-style hook, so tasks rendered bullet **and** checkbox — see §5.2 |
 | 7 | Scroll position preserved by pixel offset | Tail-sticky: a reader at the bottom stays pinned, others keep position | Preserving raw pixels yanks a mid-document reader down on every agent append |
 | 8 | `close_file` used the raw path | Canonicalizes before unwatching | `watch_file` registers canonical paths; a mismatch leaks the watch |
-| 9 | 1 unit test | 4 unit tests | Covers idempotent watch, untracked unwatch, multi-document isolation |
+| 9 | 1 unit test | 12 unit tests | Watch registry lifecycle (4) + renderer opt-in precedence (8) |
 | 10 | `/tmp/agent_*.md` in `.gitignore` | Dropped | A leading `/` anchors to the repo root; the pattern can never match |
 
 ## 5. Defects Found by Runtime Testing
@@ -126,6 +128,29 @@ axis, the default `align-content: stretch` inflated the header's line, pushing
 the toolbar ~170 px down and leaving a dead band at the top. Replaced with CSS
 Grid and named areas, which have no free space to redistribute.
 
+### 5.4 Blank white window on NVIDIA (reported after the initial release)
+
+Launching the installed binary produced a healthy process, a window, and a blank
+white pane, plus `Failed to create GBM buffer of size 1100x800: Invalid argument`.
+
+This was initially filed as an environment quirk — the VM's display stack — and
+documented as a workaround. That was wrong. The machine has a real RTX 2060 with
+OpenGL 4.6 and direct rendering; the failure is WebKitGTK's DMA-BUF renderer
+negotiating GBM buffer modifiers through **Mesa**, which the NVIDIA proprietary
+driver does not accept. Mesa-level workarounds (`MESA_LOADER_DRIVER_OVERRIDE`,
+`GBM_BACKEND=nvidia`, `LIBGL_ALWAYS_SOFTWARE`) were each tested and all still
+rendered blank, because the negotiation happens beneath them. Only
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` worked.
+
+Rather than leave an env var for users to discover, `render.rs` now disables the
+DMA-BUF renderer in-process before the first window is created. A markdown
+viewer gains nothing from that path (it targets video and heavy canvas
+compositing). Precedence:
+
+1. `WEBKIT_DISABLE_DMABUF_RENDERER` already exported → never overridden.
+2. `--accelerated` flag or `DOCDECK_ACCELERATED=1` → DMA-BUF left enabled.
+3. Otherwise → DMA-BUF disabled.
+
 ## 6. Technical Decisions
 
 - **WebKitGTK via Tauri, not Electron** — keeps the process well under the plan's
@@ -141,12 +166,14 @@ Grid and named areas, which have no free space to redistribute.
   two high-severity advisories. `npm audit` reports **0 vulnerabilities**.
 - **Grammars limited to `highlight.js/lib/common`** — ~40 languages covers agent
   documents; the full bundle is ~1 MB of rarely-used grammars.
+- **DMA-BUF renderer off by default** — it is the single most common cause of a
+  blank window on Linux desktops, and this app has no use for it.
 
 ## 7. Testing Notes
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Unit tests | `npm test` | 4 passed, 0 failed |
+| Unit tests | `npm test` | 12 passed, 0 failed |
 | Rust formatting | `cargo fmt --check` | clean |
 | Rust lints | `npm run lint:rs` | clean with `-D warnings` |
 | TypeScript | `npm run typecheck` | clean |
@@ -161,11 +188,19 @@ the toolbar flush at top; second `docdeck` invocation → opens a third tab in t
 **same** window, process count stays at 1; task lists, syntax highlighting and
 Mermaid all render correctly.
 
-> On this VM's software renderer WebKitGTK logs `Failed to create GBM buffer`
-> and paints a blank window. Reproducing with
-> `WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1` works. This
-> is a display-stack limitation, not an application defect — documented in the
-> README.
+**Renderer verification** (§5.4) re-run with `env -i`, so nothing at all was
+inherited from the shell:
+
+| Configuration | Result |
+| --- | --- |
+| `env -i … docdeck file.md` (shipped default) | rendered, 697 colours, 0 GBM errors |
+| `WEBKIT_DISABLE_DMABUF_RENDERER=0` (forced accelerated) | blank — confirms the opt-out is required here |
+| `MESA_LOADER_DRIVER_OVERRIDE=nvidia` | blank |
+| `GBM_BACKEND=nvidia` | blank |
+| `LIBGL_ALWAYS_SOFTWARE=1` | blank |
+
+> The plan's *"~45 MB RAM"* ceiling is still **unverified** — no memory
+> measurement was taken.
 
 ## 8. Documentation Updates
 

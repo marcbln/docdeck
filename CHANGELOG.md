@@ -23,5 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/simulate_agent_writes.sh` end-to-end harness that simulates
   background agent writes.
 
+### Fixed
+- Startup documents are no longer lost: arguments are pulled through a
+  `startup_paths` command once the webview is listening, replacing a fixed sleep
+  that raced the webview's mount.
+- Task lists no longer render a bullet alongside each `- [x]` checkbox.
+- The toolbar stays flush at the top in sidebar layout.
+- WebKitGTK's DMA-BUF renderer is disabled by default. Its GBM buffer modifier
+  negotiation is incompatible with the NVIDIA proprietary driver and produced a
+  blank white window; `--accelerated` (or `DOCDECK_ACCELERATED=1`) opts back in.
+
 [Unreleased]: https://github.com/marc/docdeck/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/marc/docdeck/releases/tag/v0.1.0

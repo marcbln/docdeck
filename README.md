@@ -97,6 +97,7 @@ src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
   commands.rs         load_file / close_file commands
   watcher.rs          Debounced inotify watcher and watch registry
+  render.rs           WebKit renderer configuration
 ```
 
 The Rust side is deliberately limited to OS concerns (process IPC, filesystem
@@ -110,8 +111,15 @@ only at three `invoke` commands and two events (`open-file-cli`, `file-updated`)
   write-to-temp-then-rename invalidates the inode-level watch; re-open the tab to
   re-attach. In-place writes and appends are unaffected.
 - **Renders markdown only.** No editing.
-- **Headless / VM displays.** WebKitGTK's accelerated path logs
-  `Failed to create GBM buffer` and paints a blank window on some software
-  renderers. Launch with `WEBKIT_DISABLE_COMPOSITING_MODE=1
-  WEBKIT_DISABLE_DMABUF_RENDERER=1 docdeck <file>` to fall back to software
-  compositing.
+- **DMA-BUF rendering is off by default.** WebKitGTK negotiates GBM buffer
+  modifiers through Mesa, which the NVIDIA proprietary driver does not accept —
+  that combination paints a blank white window and logs
+  `Failed to create GBM buffer ...: Invalid argument`. docdeck disables the
+  DMA-BUF renderer at startup, since a markdown viewer does not need it. To opt
+  back in on hardware where it works:
+
+  ```bash
+  docdeck --accelerated report.md     # or: DOCDECK_ACCELERATED=1 docdeck report.md
+  ```
+
+  Exporting `WEBKIT_DISABLE_DMABUF_RENDERER` yourself always takes precedence.

@@ -1,6 +1,9 @@
 mod commands;
+mod render;
 mod watcher;
 
+#[cfg(test)]
+mod render_test;
 #[cfg(test)]
 mod watcher_test;
 
@@ -37,6 +40,12 @@ fn startup_paths() -> Vec<String> {
 }
 
 pub fn run() {
+    let argv: Vec<String> = env::args().collect();
+
+    // Must happen before any window exists: WebKitGTK reads these once, while
+    // it initialises, so setting them later has no effect.
+    render::configure(&argv);
+
     let watcher_state = WatcherState::new();
 
     let mut builder = tauri::Builder::default();
