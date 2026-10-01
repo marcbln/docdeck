@@ -1,0 +1,352 @@
+@import "github-markdown-css/github-markdown-dark.css";
+@import "highlight.js/styles/github-dark.css";
+
+:root {
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-elevated: #313244;
+  --border-color: #313244;
+  --text-primary: #cdd6f4;
+  --text-muted: #6c7086;
+  --accent-color: #89b4fa;
+  --dot-color: #fab387;
+  --danger-color: #f38ba8;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   Application shell
+
+   Grid rather than flexbox: the toolbar, tab bar and document pane need to
+   reflow between two different shapes. A wrapping flex container splits into
+   two flex *lines*, and the default `align-content: stretch` then inflates
+   whichever line is shorter — pushing the toolbar down the window in sidebar
+   mode. Explicit grid areas have no such free space to redistribute.
+   -------------------------------------------------------------------------- */
+
+.app-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "header header"
+    "tabs   content";
+  height: 100vh;
+  width: 100vw;
+}
+
+.layout-top {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "header"
+    "tabs"
+    "content";
+}
+
+#header-bar {
+  grid-area: header;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+}
+
+.header-controls button {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: none;
+  padding: 4px 10px;
+  margin-right: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s ease-in-out;
+}
+
+.header-controls button:hover {
+  background: var(--accent-color);
+  color: var(--bg-primary);
+}
+
+.header-controls button.active {
+  background: var(--accent-color);
+  color: var(--bg-primary);
+  font-weight: bold;
+}
+
+/* --------------------------------------------------------------------------
+   Tab bar — horizontal strip on top, vertical rail on the left
+   -------------------------------------------------------------------------- */
+
+#tabs-bar {
+  grid-area: tabs;
+  background-color: var(--bg-secondary);
+  display: flex;
+}
+
+.layout-top #tabs-bar {
+  flex-direction: row;
+  width: 100%;
+  min-height: 40px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.layout-side #tabs-bar {
+  flex-direction: column;
+  width: 250px;
+  min-width: 200px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-color);
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  user-select: none;
+  font-size: 13px;
+  text-align: left;
+  transition:
+    color 0.15s ease-in-out,
+    background 0.15s ease-in-out;
+}
+
+.layout-top .tab-item {
+  border-right: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.layout-side .tab-item {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.layout-top .tab-item:hover,
+.layout-side .tab-item:hover {
+  color: var(--text-primary);
+}
+
+.tab-item.active {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.tab-title {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.layout-side .tab-title {
+  flex: 1 1 auto;
+}
+
+.tab-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  background-color: var(--dot-color);
+  border-radius: 50%;
+  display: none;
+  animation: pulse 1.5s infinite;
+}
+
+.tab-item.has-update .tab-dot {
+  display: inline-block;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(250, 179, 135, 0.7);
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 6px rgba(250, 179, 135, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(250, 179, 135, 0);
+  }
+}
+
+.tab-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 2px;
+  opacity: 0.6;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  color: var(--danger-color);
+}
+
+/* --------------------------------------------------------------------------
+   Document pane
+   -------------------------------------------------------------------------- */
+
+#content-container {
+  grid-area: content;
+  /* `minmax(0, 1fr)` on the track plus `min-height: 0` here is what lets the
+     pane scroll internally instead of stretching the grid row. */
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  position: relative;
+  background: var(--bg-primary);
+}
+
+.markdown-body {
+  padding: 32px 48px;
+  max-width: 900px;
+  margin: 0 auto;
+  background-color: transparent;
+}
+
+.empty-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-placeholder code {
+  background-color: var(--bg-elevated);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* --------------------------------------------------------------------------
+   Markdown content adjustments for the dark surface
+   -------------------------------------------------------------------------- */
+
+.markdown-body a {
+  color: var(--accent-color);
+}
+
+.markdown-body code {
+  background-color: rgba(49, 50, 68, 0.6);
+}
+
+.markdown-body pre {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.markdown-body pre code {
+  background-color: transparent;
+}
+
+.markdown-body blockquote {
+  border-left-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  border-color: var(--border-color);
+}
+
+.markdown-body table tr {
+  background-color: transparent;
+}
+
+.markdown-body table tr:nth-child(2n) {
+  background-color: rgba(49, 50, 68, 0.25);
+}
+
+/* Task lists rendered by marked from `- [x]` checkboxes. marked wraps each
+   item in a `<p>` (loose list), so collapse it to keep rows tight. */
+.markdown-body .task-list-item {
+  list-style-type: none;
+}
+
+.markdown-body .task-list-item > p {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-body .task-list-item input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--accent-color);
+}
+
+/* Mermaid diagrams injected by the renderer. */
+.markdown-body .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+}
+
+.markdown-body .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbars
+   -------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-elevated) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--bg-elevated);
+  border-radius: 5px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}

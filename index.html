@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-color-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docdeck</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app" class="app-layout layout-top">
+      <header id="header-bar">
+        <div class="header-controls">
+          <button id="toggle-layout-btn" title="Toggle Sidebar/Top Tabs">
+            &#8644; Layout
+          </button>
+          <button id="toggle-autosort-btn" title="Toggle Auto-sort by Last Modified">
+            &#9889; Auto-Sort: OFF
+          </button>
+        </div>
+      </header>
+
+      <nav id="tabs-bar" class="tabs-container"></nav>
+
+      <main id="content-container">
+        <div id="empty-state" class="empty-placeholder">
+          <p>
+            No document loaded. Run <code>docdeck &lt;file.md&gt;</code> or open a
+            file via the CLI.
+          </p>
+        </div>
+        <article id="markdown-viewer" class="markdown-body hidden"></article>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "name": "docdeck",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lightweight tabbed Markdown viewer for monitoring AI agent documents",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit",
+    "test": "cd src-tauri && cargo test",
+    "test:watch": "cd src-tauri && cargo test -- --nocapture",
+    "lint:rs": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "check": "npm run typecheck && npm run test && npm run tauri build -- --no-bundle",
+    "simulate": "./scripts/simulate_agent_writes.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "github-markdown-css": "^5.9.0",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.0.14",
+    "marked-highlight": "^2.2.4",
+    "mermaid": "^11.17.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}
