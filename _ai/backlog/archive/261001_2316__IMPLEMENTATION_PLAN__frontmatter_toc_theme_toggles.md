@@ -3,7 +3,8 @@ filename: "_ai/backlog/active/261001_2316__IMPLEMENTATION_PLAN__frontmatter_toc_
 title: "Frontmatter Metadata Table, Table of Contents, Light/Dark Theme and View Toggles for docdeck"
 createdAt: 2026-10-01 23:16
 updatedAt: 2026-10-01 23:16
-status: draft
+status: completed
+completedAt: 2026-10-02 08:35
 priority: high
 tags: [typescript, vite, markdown, frontmatter, yaml, toc, theming, vitest]
 estimatedComplexity: moderate
@@ -2581,6 +2582,7 @@ updatedAt: <completion timestamp>
 planFile: "_ai/backlog/active/261001_2316__IMPLEMENTATION_PLAN__frontmatter_toc_theme_toggles.md"
 project: "docdeck"
 status: completed
+completedAt: 2026-10-02 08:35
 filesCreated: 0
 filesModified: 0
 filesDeleted: 0
