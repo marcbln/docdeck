@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "lint:rs": "cd src-tauri && cargo clippy --all-targets -- -D warnings",
     "check": "npm run typecheck && npm run test && npm run tauri build -- --no-bundle",
-    "simulate": "./scripts/simulate_agent_writes.sh"
+    "simulate": "./scripts/simulate_agent_writes.sh",
+    "install:bin": "./scripts/install.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
