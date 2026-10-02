@@ -39,8 +39,8 @@ resolve_binary() {
 
 BINARY="$(resolve_binary "${1:-}")"
 
-printf '# Agent Alpha — Initial Plan\n\n- [ ] Step pending\n' > "$DOC_ALPHA"
-printf '# Agent Beta — Initial Report\n\n- [ ] Step pending\n' > "$DOC_BETA"
+printf -- '---\ntitle: "Agent Alpha"\nstatus: in-progress\ntags: [agent, alpha]\n---\n\n# Agent Alpha — Initial Plan\n\n- [ ] Step pending\n' > "$DOC_ALPHA"
+printf -- '---\ntitle: "Agent Beta"\nstatus: in-progress\ntags: [agent, beta]\n---\n\n# Agent Beta — Initial Report\n\n- [ ] Step pending\n' > "$DOC_BETA"
 
 APP_PID=""
 cleanup() {
@@ -79,6 +79,10 @@ Verification checklist:
   3. With "Auto-Sort" enabled, the Beta tab bubbles to the top of the list.
   4. In a second terminal, `docdeck README.md` opens a third tab in THIS window
      rather than starting a second process.
+  5. Both simulated documents open with a frontmatter table above the body.
+  6. The Outline button lists the documents' headings and jumps to one.
+  7. Folding the metadata table survives the agent's background appends.
+  8. The Theme button flips chrome, code blocks and Mermaid colors.
 EOF
 
 printf 'Press Ctrl+C to stop docdeck.\n'

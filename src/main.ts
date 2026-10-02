@@ -1,7 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { renderMarkdown } from "./markdown";
+import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
+import {
+  applyMermaidTheme,
+  isTailing,
+  marked,
+  renderMarkdown,
+} from "./markdown";
+import { MetadataView } from "./metadata-jump";
+import {
+  createPreferenceWriter,
+  loadPreferences,
+  type Preferences,
+  type ThemeMode,
+} from "./preferences";
+import { createToggleButton } from "./toolbar";
+import { extractHeadings } from "./toc";
+import { TocPanel } from "./toc-panel";
+import { ThemeController } from "./theme";
 
 interface FilePayload {
   path: string;
@@ -36,16 +53,52 @@ class AppState {
    */
   private readonly reloadTokens = new Map<string, number>();
 
+  private preferences: Preferences = loadPreferences();
+
   private readonly appRoot = must<HTMLDivElement>("app");
   private readonly tabsBar = must<HTMLElement>("tabs-bar");
   private readonly emptyState = must<HTMLElement>("empty-state");
   private readonly viewer = must<HTMLElement>("markdown-viewer");
+  private readonly contentContainer = must<HTMLElement>("content-container");
+  private readonly tocPanelEl = must<HTMLElement>("toc-panel");
   private readonly layoutBtn = must<HTMLButtonElement>("toggle-layout-btn");
   private readonly autosortBtn = must<HTMLButtonElement>("toggle-autosort-btn");
 
+  private readonly writer = createPreferenceWriter();
+  private readonly tocPanel: TocPanel;
+  private readonly metadata: MetadataView;
+  private readonly theme: ThemeController;
+
   constructor() {
+    this.metadata = new MetadataView(
+      this.viewer,
+      this.preferences.frontmatterVisible,
+    );
+    this.tocPanel = new TocPanel({
+      container: this.tocPanelEl,
+      scrollParent: this.contentContainer,
+      onJumpToMetadata: () => this.metadata.reveal(),
+    });
+    this.theme = new ThemeController({
+      onMermaidThemeChange: applyMermaidTheme,
+      // Mermaid bakes colors into the SVG at render time, so a mode change has
+      // to be followed by a re-render or diagrams keep the old palette.
+      onModeApplied: () => void this.renderActiveContent(),
+    });
+
+    this.applyPreferencesToUi();
     this.bindControls();
+    this.theme.apply(this.preferences.themeMode);
     void this.start();
+  }
+
+  /** Applies the restored preferences before any control is clicked. */
+  private applyPreferencesToUi(): void {
+    this.tocPanelEl.hidden = !this.preferences.tocVisible;
+  }
+
+  private persist(): void {
+    this.writer.schedule(this.preferences);
   }
 
   private async start(): Promise<void> {
@@ -84,6 +137,51 @@ class AppState {
         this.autoSort ? "ON" : "OFF"
       }`;
       this.renderTabs();
+    });
+
+    createToggleButton({
+      element: must<HTMLButtonElement>("toggle-toc-btn"),
+      icon: "☰",
+      label: "Outline",
+      tooltip: "Toggle Table of Contents",
+      initialState: this.preferences.tocVisible,
+      formatLabel: (state) => (state ? "ON" : "OFF"),
+      onChange: (next) => {
+        this.preferences.tocVisible = next;
+        this.tocPanelEl.hidden = !next;
+        this.persist();
+      },
+    });
+
+    createToggleButton({
+      element: must<HTMLButtonElement>("toggle-frontmatter-btn"),
+      icon: "⚙",
+      label: "Frontmatter",
+      tooltip: "Toggle Document Metadata",
+      initialState: this.preferences.frontmatterVisible,
+      formatLabel: (state) => (state ? "ON" : "OFF"),
+      onChange: (next) => {
+        this.preferences.frontmatterVisible = next;
+        const table = this.viewer.querySelector("details.metadata-table");
+        if (table) table.remove();
+        if (next) void this.renderActiveContent();
+        this.persist();
+      },
+    });
+
+    createToggleButton({
+      element: must<HTMLButtonElement>("toggle-theme-btn"),
+      icon: "☀",
+      label: "Theme",
+      tooltip: "Toggle Light/Dark Theme",
+      initialState: this.preferences.themeMode === "light",
+      formatLabel: (state) => (state ? "Light" : "Dark"),
+      onChange: (next) => {
+        const mode: ThemeMode = next ? "light" : "dark";
+        this.preferences.themeMode = mode;
+        this.theme.apply(mode);
+        this.persist();
+      },
     });
   }
 
@@ -239,6 +337,15 @@ class AppState {
     }
   }
 
+  /**
+   * Paints the active document.
+   *
+   * Order matters: the body is compiled with heading slugs stamped onto its
+   * h1-h4 elements, the frontmatter table is then prepended above that markup
+   * (the compiler owns `innerHTML`, so anything mounted first would be wiped),
+   * and only then is the TOC rebuilt — it resolves anchors by id against the
+   * elements the previous steps wrote.
+   */
   private async renderActiveContent(): Promise<void> {
     const tab = this.activePath ? this.tabs.get(this.activePath) : undefined;
 
@@ -246,14 +353,35 @@ class AppState {
       this.emptyState.classList.remove("hidden");
       this.viewer.classList.add("hidden");
       this.viewer.replaceChildren();
+      this.metadata.clear();
+      this.tocPanel.rebuild([]);
       return;
     }
 
     this.emptyState.classList.add("hidden");
     this.viewer.classList.remove("hidden");
 
+    const { raw, body } = splitFrontmatter(tab.content);
+
+    // Captured before the paint so the table's height — added after the
+    // renderer has already restored the scroll position — is accounted for.
+    const wasTailing = isTailing(this.contentContainer);
+
     try {
-      await renderMarkdown(tab.content, this.viewer);
+      this.metadata.clear();
+      this.viewer.replaceChildren();
+
+      const headings = extractHeadings(marked, body);
+      await renderMarkdown(body, this.viewer, headings);
+
+      if (raw !== null && this.preferences.frontmatterVisible) {
+        this.metadata.mount(parseFrontmatterRows(raw));
+        if (wasTailing) {
+          this.contentContainer.scrollTop = this.contentContainer.scrollHeight;
+        }
+      }
+
+      this.tocPanel.rebuild(headings);
     } catch (error) {
       console.error("Failed to render markdown", error);
       this.showMessage(`Could not render ${tab.filename}`);

@@ -1,5 +1,6 @@
-@import "github-markdown-css/github-markdown-dark.css";
-@import "highlight.js/styles/github-dark.css";
+/* Stylesheets are linked at runtime by src/theme.ts — the dark and light
+   github-markdown-css variants both define `.markdown-body`, so only one may be
+   active at a time. theme.ts appends the <link> elements to <head>. */
 
 :root {
   --bg-primary: #1e1e2e;
@@ -12,6 +13,39 @@
   --dot-color: #fab387;
   --danger-color: #f38ba8;
   color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+   Light theme — Catppuccin Latte.
+
+   The dark `:root` set above is Mocha; Latte is its documented light
+   counterpart, so accent and semantic colors stay coherent across the switch.
+   --------------------------------------------------------------------------- */
+
+[data-color-mode="light"] {
+  --bg-primary: #eff1f5;
+  --bg-secondary: #e6e9ef;
+  --bg-elevated: #ccd0da;
+  --border-color: #bcc0cc;
+  --text-primary: #4c4f69;
+  --text-muted: #6c6f85;
+  --accent-color: #1e66f5;
+  --dot-color: #fe640b;
+  --danger-color: #d20f39;
+  color-scheme: light;
+}
+
+[data-color-mode="light"] .header-controls button:hover,
+[data-color-mode="light"] .header-controls button.active {
+  color: #eff1f5;
+}
+
+[data-color-mode="light"] .markdown-body code {
+  background-color: rgba(172, 176, 190, 0.4);
+}
+
+[data-color-mode="light"] .markdown-body table tr:nth-child(2n) {
+  background-color: rgba(172, 176, 190, 0.25);
 }
 
 * {
@@ -46,22 +80,39 @@ body {
 
 .app-layout {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
-    "header header"
-    "tabs   content";
+    "header header header"
+    "tabs   toc    content";
   height: 100vh;
   width: 100vw;
 }
 
 .layout-top {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-areas:
-    "header"
-    "tabs"
-    "content";
+    "header  header"
+    "tabs    tabs"
+    "toc     content";
+}
+
+/* The outline is a third grid column between the tab bar and the document.
+   It collapses to zero width when hidden so the document pane reclaims the
+   space without a reflow of its own internals. */
+#toc-panel {
+  grid-area: toc;
+  width: 240px;
+  min-width: 0;
+  overflow-y: auto;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  padding: 12px 0;
+}
+
+#toc-panel[hidden] {
+  display: none;
 }
 
 #header-bar {
@@ -322,6 +373,162 @@ body {
 .markdown-body .mermaid svg {
   max-width: 100%;
   height: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Frontmatter metadata table
+
+   Sits above the document body inside the scroll pane, so it scrolls with the
+   content and is reachable by the TOC's "Document metadata" entry.
+   -------------------------------------------------------------------------- */
+
+.markdown-body .metadata-table {
+  margin: 0 0 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.markdown-body .metadata-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+  list-style-position: inside;
+}
+
+.markdown-body .metadata-summary:hover {
+  color: var(--text-primary);
+}
+
+.markdown-body .metadata-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0;
+}
+
+.markdown-body .metadata-grid th,
+.markdown-body .metadata-grid td {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-body .metadata-grid thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.markdown-body .metadata-grid tbody tr {
+  background-color: transparent;
+}
+
+.markdown-body .metadata-key {
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", monospace;
+  color: var(--accent-color);
+  white-space: nowrap;
+  width: 1%;
+}
+
+.markdown-body .metadata-value {
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", monospace;
+  color: var(--text-primary);
+  /* Long values (a full path, a wrapped title) must wrap rather than force the
+     whole table wider than the pane. */
+  overflow-wrap: anywhere;
+}
+
+.markdown-body .metadata-row-nested .metadata-key {
+  padding-left: 26px;
+}
+
+.markdown-body .metadata-empty {
+  color: var(--text-muted);
+}
+
+.markdown-body .metadata-malformed .metadata-value {
+  color: var(--danger-color);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------------------
+   Table of contents sidebar
+   -------------------------------------------------------------------------- */
+
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc-item {
+  margin: 0;
+}
+
+.toc-link {
+  display: block;
+  padding: 4px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-link:hover {
+  color: var(--text-primary);
+}
+
+/* Indentation mirrors heading depth so the outline's shape is visible. */
+.toc-depth-1 .toc-link {
+  padding-left: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.toc-depth-2 .toc-link {
+  padding-left: 24px;
+}
+
+.toc-depth-3 .toc-link {
+  padding-left: 34px;
+}
+
+.toc-depth-4 .toc-link {
+  padding-left: 44px;
+}
+
+.toc-item.active > .toc-link {
+  color: var(--accent-color);
+  border-left-color: var(--accent-color);
+  background-color: var(--bg-elevated);
+}
+
+.toc-item-metadata {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.toc-item-metadata .toc-link {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.toc-empty .toc-list {
+  display: none;
 }
 
 /* --------------------------------------------------------------------------

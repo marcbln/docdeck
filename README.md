@@ -23,6 +23,12 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   in the *running* window instead of starting a second process.
 - **GitHub-flavoured Markdown** — tables, task lists (`- [x]`), syntax-highlighted
   code blocks and Mermaid diagrams, with scroll position preserved across reloads.
+- **Frontmatter as a table** — YAML headers render as a collapsible, two-column
+  metadata table instead of raw text, with a TOC entry that jumps to it.
+- **Table of contents** — an `h1`–`h4` outline in a collapsible sidebar that
+  tracks the reading position as you scroll.
+- **Light and dark themes** — Catppuccin Mocha and Latte, covering the app
+  chrome, GitHub markdown styles, syntax highlighting and Mermaid diagrams.
 
 ## Requirements (Linux)
 
@@ -69,15 +75,26 @@ docdeck ./reports/agent_status.md
 | --- | --- |
 | `⇄ Layout` | Switch the tab bar between top and left sidebar |
 | `⚡ Auto-Sort` | Order tabs by most recently modified |
+| `☰ Outline` | Show or hide the table of contents sidebar |
+| `⚙ Frontmatter` | Show or hide the metadata table above each document |
+| `☀ Theme` | Switch between the dark and light palettes |
 | Click a tab | Activate it and clear its unread dot |
 | `×` on a tab | Close it and release its file watch |
+
+### Preferences
+
+Theme, outline visibility and frontmatter visibility are stored under the
+`docdeck.preferences.v1` key in `localStorage`, so docdeck reopens the way you
+left it. Clear that key to reset to defaults (dark theme, outline hidden,
+frontmatter shown).
 
 ## Development
 
 ```bash
 npm run tauri dev -- ./README.md   # run the app with a document loaded
 npm run typecheck                  # tsc --noEmit
-npm test                           # cargo test
+npm run test:web                   # vitest (frontend unit tests)
+npm test                           # cargo test + vitest
 npm run lint:rs                    # cargo clippy -D warnings
 npm run simulate                   # end-to-end agent-write simulation
 ```
@@ -90,9 +107,17 @@ bursts like a running agent would, and prints a verification checklist. See
 
 ```
 src/                  Frontend — tab state, layout, markdown rendering
-  main.ts             AppState: tab registry, CLI events, watcher events
-  markdown.ts         marked + highlight.js + mermaid pipeline
-  style.css           Catppuccin dark theme, both tab layouts
+  main.ts             AppState: tab registry, CLI events, watcher events, wiring
+  markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
+  frontmatter.ts      YAML header split + parse into table rows
+  toc.ts              Heading extraction and GitHub-compatible slugs
+  toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
+  theme.ts            Stylesheet swap, Catppuccin Latte, mermaid theming
+  metadata-table.ts   Frontmatter <details> table view
+  metadata-jump.ts    Metadata collapsed state and reveal
+  toolbar.ts          Reusable toggle button
+  preferences.ts      Versioned localStorage persistence
+  style.css           Catppuccin Mocha + Latte, layouts, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
   commands.rs         load_file / close_file commands

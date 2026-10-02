@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Frontmatter metadata table: YAML headers render as a collapsible two-column
+  table instead of raw markdown prose, with nested keys indented, lists
+  stringified inline and malformed YAML degrading to a raw-text row rather than
+  blanking the document.
+- Table of contents sidebar listing `h1`–`h4`, with scroll-spy highlighting,
+  click-to-jump, and a pinned "Document metadata" entry that expands the
+  frontmatter table and scrolls to it.
+- Light/dark theme toggle (Catppuccin Latte and Mocha) covering app chrome,
+  GitHub markdown styles, syntax highlighting and Mermaid diagrams.
+- Toolbar toggles for the outline and frontmatter table, all three new
+  preferences persisted under `docdeck.preferences.v1`.
+
+### Changed
+- `npm test` now runs the Rust suite and the frontend vitest suite in sequence.
+- Frontend logic is split into focused modules (`frontmatter`, `toc`,
+  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`) with
+  `main.ts` reduced to orchestration.
+
 ## [0.1.0] - 2026-10-01
 
 ### Added
