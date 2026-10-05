@@ -1,7 +1,10 @@
+//! Tauri command surface: disk reads, watch registration, folder discovery.
+
 use std::fs;
 use std::path::PathBuf;
 use tauri::State;
 
+use crate::folder;
 use crate::watcher::WatcherState;
 
 #[derive(serde::Serialize)]
@@ -10,6 +13,13 @@ pub struct FilePayload {
     pub filename: String,
     pub content: String,
     pub modified_time: u64,
+}
+
+/// A watched root and every Markdown document discovered beneath it.
+#[derive(serde::Serialize)]
+pub struct FolderScan {
+    pub root: String,
+    pub files: Vec<String>,
 }
 
 /// Reads a document from disk and registers it with the file watcher.
@@ -52,4 +62,37 @@ pub fn close_file(path_str: String, watcher: State<WatcherState>) -> Result<(), 
     let path = PathBuf::from(&path_str);
     let canonical = path.canonicalize().unwrap_or(path);
     watcher.unwatch_file(&canonical)
+}
+
+/// Lists the Markdown documents under a folder so the picker can build its tree.
+#[tauri::command]
+pub fn scan_folder(path_str: String) -> Result<FolderScan, String> {
+    let root = PathBuf::from(&path_str)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+
+    let files = folder::scan_markdown(&root)?
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+
+    Ok(FolderScan {
+        root: root.to_string_lossy().into_owned(),
+        files,
+    })
+}
+
+/// Starts one recursive watch per folder once the user confirms the picker.
+#[tauri::command]
+pub fn watch_folders(paths: Vec<String>, watcher: State<WatcherState>) -> Result<(), String> {
+    let roots = paths
+        .iter()
+        .map(|path| {
+            PathBuf::from(path)
+                .canonicalize()
+                .map_err(|e| format!("{path}: {e}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    watcher.watch_roots(&roots)
 }
