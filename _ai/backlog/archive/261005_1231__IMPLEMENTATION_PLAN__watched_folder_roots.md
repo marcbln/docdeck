@@ -3,7 +3,8 @@ filename: "_ai/backlog/active/261005_1231__IMPLEMENTATION_PLAN__watched_folder_r
 title: "Watched folder roots: recursive _ai monitoring with a selection modal"
 createdAt: 2026-10-05 12:31
 updatedAt: 2026-10-05 12:31
-status: draft
+status: completed
+completedAt: 2026-10-05 21:25
 priority: high
 tags: [watcher, inotify, cli, modal, ux]
 estimatedComplexity: complex
@@ -1989,6 +1990,7 @@ planFile: "_ai/backlog/active/261005_1231__IMPLEMENTATION_PLAN__watched_folder_r
 specFile: ""
 project: "docdeck"
 status: completed
+completedAt: 2026-10-05 21:25
 filesCreated: 0
 filesModified: 0
 filesDeleted: 0
