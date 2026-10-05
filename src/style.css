@@ -376,6 +376,76 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Code block copy button
+
+   The wrapper is the positioning context so the button stays put while a long
+   line scrolls horizontally under it — an absolutely positioned child of the
+   scrolling `pre` itself would travel with the text.
+   -------------------------------------------------------------------------- */
+
+.markdown-body .code-block {
+  position: relative;
+}
+
+.markdown-body .code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  /* Hidden until wanted, but still focusable so the keyboard path works. */
+  opacity: 0;
+  transition:
+    opacity 0.15s ease-in-out,
+    color 0.15s ease-in-out,
+    background-color 0.15s ease-in-out,
+    border-color 0.15s ease-in-out;
+}
+
+.markdown-body .code-block:hover .code-copy,
+.markdown-body .code-copy:focus-visible {
+  opacity: 1;
+}
+
+.markdown-body .code-copy:hover {
+  color: var(--text-primary);
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+/* After the :hover rule on purpose: equal specificity, and confirmation must
+   stay legible while the pointer is still resting on the button. */
+.markdown-body .code-copy.copied {
+  color: #a6e3a1;
+  background-color: var(--bg-elevated);
+  border-color: #a6e3a1;
+}
+
+.markdown-body .code-copy.failed {
+  color: var(--danger-color);
+  background-color: var(--bg-elevated);
+  border-color: var(--danger-color);
+}
+
+/* Latte's green, matching the dark palette above. */
+[data-color-mode="light"] .markdown-body .code-copy.copied {
+  color: #40a02b;
+  border-color: #40a02b;
+}
+
+/* --------------------------------------------------------------------------
    Frontmatter metadata table
 
    Sits above the document body inside the scroll pane, so it scrolls with the

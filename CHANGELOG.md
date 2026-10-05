@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Copy button on every code block: a hover-revealed button puts the snippet's
+  plain source on the clipboard and confirms with a checkmark, falling back to
+  `execCommand` on webviews without the async Clipboard API. Mermaid diagrams are
+  skipped — their source was already replaced by the rendered SVG.
 - Frontmatter metadata table: YAML headers render as a collapsible two-column
   table instead of raw markdown prose, with nested keys indented, lists
   stringified inline and malformed YAML degrading to a raw-text row rather than
@@ -23,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `npm test` now runs the Rust suite and the frontend vitest suite in sequence.
 - Frontend logic is split into focused modules (`frontmatter`, `toc`,
-  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`) with
-  `main.ts` reduced to orchestration.
+  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`, `copy-code`)
+  with `main.ts` reduced to orchestration.
 
 ## [0.1.0] - 2026-10-01
 

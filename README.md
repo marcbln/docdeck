@@ -23,6 +23,8 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   in the *running* window instead of starting a second process.
 - **GitHub-flavoured Markdown** — tables, task lists (`- [x]`), syntax-highlighted
   code blocks and Mermaid diagrams, with scroll position preserved across reloads.
+- **Copy code** — hover any code block for a button that puts its plain source on
+  the clipboard and confirms with a checkmark. Diagrams are skipped.
 - **Frontmatter as a table** — YAML headers render as a collapsible, two-column
   metadata table instead of raw text, with a TOC entry that jumps to it.
 - **Table of contents** — an `h1`–`h4` outline in a collapsible sidebar that
@@ -78,6 +80,7 @@ docdeck ./reports/agent_status.md
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
 | `☀ Theme` | Switch between the dark and light palettes |
+| `⧉` on a code block | Copy the snippet's source to the clipboard |
 | Click a tab | Activate it and clear its unread dot |
 | `×` on a tab | Close it and release its file watch |
 
@@ -109,6 +112,7 @@ bursts like a running agent would, and prints a verification checklist. See
 src/                  Frontend — tab state, layout, markdown rendering
   main.ts             AppState: tab registry, CLI events, watcher events, wiring
   markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
+  copy-code.ts        Clipboard write with fallback, per-block copy buttons
   frontmatter.ts      YAML header split + parse into table rows
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
