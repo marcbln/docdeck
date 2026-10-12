@@ -17,6 +17,7 @@ mod watcher_test;
 
 use std::env;
 use std::io;
+use std::path::Path;
 use tauri::{Emitter, Manager};
 
 use paths::CliEntry;
@@ -29,7 +30,8 @@ use watcher::WatcherState;
 /// machines; a command the frontend calls at the right moment cannot.
 #[tauri::command]
 fn startup_paths() -> Vec<CliEntry> {
-    paths::classify_args(&env::args().collect::<Vec<_>>())
+    let cwd = env::current_dir().unwrap_or_default();
+    paths::classify_args(&env::args().collect::<Vec<_>>(), &cwd)
 }
 
 pub fn run() {
@@ -44,10 +46,11 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     // Must be registered first so the IPC socket exists before anything else.
-    builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+    builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
         // Forward `docdeck path/to/doc.md` or `docdeck ./_ai` from a second
-        // shell into the running window.
-        for entry in paths::classify_args(&argv) {
+        // shell into the running window. Relative arguments belong to *that*
+        // shell's working directory, which is `cwd` here — not ours.
+        for entry in paths::classify_args(&argv, Path::new(&cwd)) {
             let _ = app.emit("open-path-cli", entry);
         }
         if let Some(window) = app.get_webview_window("main") {

@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Toolbar toggles for the outline and frontmatter table, all three new
   preferences persisted under `docdeck.preferences.v1`.
 
+### Fixed
+- `docdeck README.md` (a relative path) from a second shell now opens the file
+  the caller meant: forwarded CLI arguments are resolved against the sending
+  shell's working directory instead of the already-running app's, which
+  silently dropped every relative path that did not exist under the app's own
+  `cwd`.
+
 ### Changed
 - Watcher events are now batched and typed (`paths-changed` carrying
   `{path, exists}`); the single-instance event is `open-path-cli` carrying

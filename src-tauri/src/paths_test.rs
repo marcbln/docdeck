@@ -67,7 +67,7 @@ mod tests {
             "/does/not/exist.md".to_string(),
         ];
 
-        let entries = classify_args(&argv);
+        let entries = classify_args(&argv, dir.path());
         assert_eq!(entries.len(), 2);
 
         let dir_entry = entries.iter().find(|entry| entry.is_dir).unwrap();
@@ -85,5 +85,27 @@ mod tests {
             file_entry.path,
             file.canonicalize().unwrap().to_string_lossy().into_owned()
         );
+    }
+
+    #[test]
+    fn classify_args_resolves_relative_paths_against_cwd() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        fs::write(&file, "# plan").unwrap();
+
+        let argv = vec!["docdeck".to_string(), "plan.md".to_string()];
+
+        // A forwarded command line resolves against the shell that sent it...
+        let entries = classify_args(&argv, dir.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].path,
+            file.canonicalize().unwrap().to_string_lossy().into_owned()
+        );
+        assert!(!entries[0].is_dir);
+
+        // ...not against whatever directory the running app happens to have.
+        let elsewhere = tempdir().unwrap();
+        assert!(classify_args(&argv, elsewhere.path()).is_empty());
     }
 }

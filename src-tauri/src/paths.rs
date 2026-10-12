@@ -57,13 +57,25 @@ pub fn is_ignored_name(name: &str) -> bool {
 /// Mirrors the old `collect_paths`: the executable is skipped, anything that
 /// does not resolve to an existing path is dropped, and every survivor is
 /// canonicalized so it matches the keys the frontend uses for tab state.
-pub fn classify_args(args: &[String]) -> Vec<CliEntry> {
+///
+/// Relative arguments are resolved against `cwd` — the directory of the
+/// process that received them. That is this process's own directory on a first
+/// launch, but the *second* shell's directory when the single-instance plugin
+/// forwards a command line, so `docdeck README.md` opens the file the caller
+/// meant instead of one relative to the already-running window.
+pub fn classify_args(args: &[String], cwd: &Path) -> Vec<CliEntry> {
     args.iter()
         .skip(1)
         .map(|arg| arg.as_str())
         .filter(|arg| !arg.starts_with('-'))
         .filter_map(|arg| {
-            let path = PathBuf::from(arg).canonicalize().ok()?;
+            let arg_path = Path::new(arg);
+            let candidate = if arg_path.is_absolute() {
+                arg_path.to_path_buf()
+            } else {
+                cwd.join(arg_path)
+            };
+            let path = candidate.canonicalize().ok()?;
             Some(CliEntry {
                 is_dir: path.is_dir(),
                 path: path.to_string_lossy().into_owned(),
