@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
+import { FolderModal } from "./folder-modal";
 import {
   applyMermaidTheme,
   isTailing,
@@ -27,12 +28,31 @@ interface FilePayload {
   modified_time: number;
 }
 
+/** A CLI argument the backend resolved: a document or a folder to watch. */
+interface CliEntry {
+  path: string;
+  is_dir: boolean;
+}
+
+/** A settled filesystem change for one path. */
+interface PathChange {
+  path: string;
+  exists: boolean;
+}
+
+/** A watched root and the Markdown documents found beneath it. */
+interface FolderScan {
+  root: string;
+  files: string[];
+}
+
 interface Tab {
   path: string;
   filename: string;
   content: string;
   modifiedTime: number;
   hasUnreadUpdate: boolean;
+  deletedOnDisk: boolean;
 }
 
 function must<T extends HTMLElement>(id: string): T {
@@ -69,6 +89,10 @@ class AppState {
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
 
+  /** Roots shown in the picker but not yet confirmed; reset on cancel/confirm. */
+  private readonly pendingRoots = new Set<string>();
+  private readonly folderModal: FolderModal;
+
   constructor() {
     this.metadata = new MetadataView(
       this.viewer,
@@ -84,6 +108,12 @@ class AppState {
       // Mermaid bakes colors into the SVG at render time, so a mode change has
       // to be followed by a re-render or diagrams keep the old palette.
       onModeApplied: () => void this.renderActiveContent(),
+    });
+
+    this.folderModal = new FolderModal({
+      isOpen: (path) => this.tabs.has(path),
+      onConfirm: (selected, known) => this.confirmFolders(selected, known),
+      onCancel: () => this.pendingRoots.clear(),
     });
 
     this.applyPreferencesToUi();
@@ -112,10 +142,16 @@ class AppState {
   /// mounted yet when the app finishes setting itself up.
   private async loadStartupPaths(): Promise<void> {
     try {
-      const paths = await invoke<string[]>("startup_paths");
-      for (const path of paths) {
-        await this.openDocument(path);
+      const entries = await invoke<CliEntry[]>("startup_paths");
+      const folders = entries
+        .filter((entry) => entry.is_dir)
+        .map((entry) => entry.path);
+
+      for (const entry of entries) {
+        if (!entry.is_dir) await this.openDocument(entry.path);
       }
+
+      if (folders.length > 0) void this.showFolderModal(folders);
     } catch (error) {
       console.error("Failed to read startup paths", error);
     }
@@ -187,14 +223,15 @@ class AppState {
 
   private async bindBackend(): Promise<void> {
     try {
-      // A second `docdeck <file>` in another shell, or args from the first launch.
-      await listen<string>("open-file-cli", (event) => {
-        void this.openDocument(event.payload);
+      // A second `docdeck <path>` in another shell. Folders reopen the picker.
+      await listen<CliEntry>("open-path-cli", (event) => {
+        if (event.payload.is_dir) void this.showFolderModal([event.payload.path]);
+        else void this.openDocument(event.payload.path);
       });
 
-      // A background write settled by the debounced inotify watcher.
-      await listen<string>("file-updated", (event) => {
-        void this.reloadDocument(event.payload);
+      // A batch of settled writes from the debounced inotify watcher.
+      await listen<PathChange[]>("paths-changed", (event) => {
+        for (const change of event.payload) void this.applyPathChange(change);
       });
     } catch (error) {
       console.error("Failed to attach backend listeners", error);
@@ -204,7 +241,10 @@ class AppState {
 
   // -- document lifecycle ---------------------------------------------------
 
-  public async openDocument(rawPath: string): Promise<void> {
+  public async openDocument(
+    rawPath: string,
+    options: { background?: boolean } = {},
+  ): Promise<void> {
     try {
       const data = await invoke<FilePayload>("load_file", { pathStr: rawPath });
 
@@ -213,20 +253,56 @@ class AppState {
         existing.filename = data.filename;
         existing.content = data.content;
         existing.modifiedTime = data.modified_time;
+        existing.deletedOnDisk = false;
       } else {
         this.tabs.set(data.path, {
           path: data.path,
           filename: data.filename,
           content: data.content,
           modifiedTime: data.modified_time,
-          hasUnreadUpdate: false,
+          hasUnreadUpdate: options.background === true,
+          deletedOnDisk: false,
         });
       }
 
-      this.setActiveTab(data.path);
+      if (options.background && this.activePath !== null) {
+        // Never steal focus from the document being read.
+        this.renderTabs();
+        if (this.activePath === data.path) await this.renderActiveContent();
+      } else {
+        this.setActiveTab(data.path);
+      }
     } catch (error) {
       console.error(`Failed to load file: ${rawPath}`, error);
-      this.showMessage(`Could not open ${rawPath}`);
+      // A background auto-open can lose the race against a delete; that is
+      // routine, not an error worth interrupting the reader for.
+      if (!options.background) this.showMessage(`Could not open ${rawPath}`);
+    }
+  }
+
+  /**
+   * Handles one settled watcher event.
+   *
+   * Deleted files keep their tab (content included) and get a marker, so a
+   * document replaced mid-read does not silently vanish. Everything that
+   * exists is either reloaded or opened in the background — focus is never
+   * taken.
+   */
+  private async applyPathChange(change: PathChange): Promise<void> {
+    const tab = this.tabs.get(change.path);
+
+    if (!change.exists) {
+      if (!tab || tab.deletedOnDisk) return;
+      tab.deletedOnDisk = true;
+      this.renderTabs();
+      if (this.activePath === change.path) await this.renderActiveContent();
+      return;
+    }
+
+    if (tab) {
+      await this.reloadDocument(change.path);
+    } else {
+      await this.openDocument(change.path, { background: true });
     }
   }
 
@@ -243,6 +319,7 @@ class AppState {
 
       tab.content = data.content;
       tab.modifiedTime = data.modified_time;
+      tab.deletedOnDisk = false;
 
       if (this.activePath === path) {
         // Reading this tab, so the change is not "unread" — paint it straight away.
@@ -269,9 +346,7 @@ class AppState {
     void this.renderActiveContent();
   }
 
-  private async closeTab(path: string, event: MouseEvent): Promise<void> {
-    event.stopPropagation();
-
+  private async closeTabPath(path: string): Promise<void> {
     try {
       await invoke("close_file", { pathStr: path });
     } catch (error) {
@@ -288,6 +363,61 @@ class AppState {
 
     this.renderTabs();
     await this.renderActiveContent();
+  }
+
+  private async closeTab(path: string, event: MouseEvent): Promise<void> {
+    event.stopPropagation();
+    await this.closeTabPath(path);
+  }
+
+  // -- folder watching -------------------------------------------------------
+
+  /** Scans each root and opens the picker; safe to call repeatedly. */
+  private async showFolderModal(roots: string[]): Promise<void> {
+    for (const root of roots) this.pendingRoots.add(root);
+    this.folderModal.show();
+
+    for (const root of roots) {
+      try {
+        const scan = await invoke<FolderScan>("scan_folder", { pathStr: root });
+        this.folderModal.addRoot(scan.root, scan.files);
+      } catch (error) {
+        console.error(`Failed to scan folder ${root}`, error);
+        this.folderModal.setRootError(root, "Could not scan this folder.");
+      }
+    }
+  }
+
+  private async confirmFolders(selected: string[], known: string[]): Promise<void> {
+    const roots = [...this.pendingRoots];
+
+    try {
+      await invoke("watch_folders", { paths: roots });
+    } catch (error) {
+      console.error("Failed to start folder watch", error);
+      return; // Keep the modal open so the user can retry or cancel.
+    }
+
+    this.pendingRoots.clear();
+
+    // Unchecking closes; checking opens. Tabs outside the picker are untouched
+    // because `known` only ever contains files the modal displayed.
+    const selectedSet = new Set(selected);
+    for (const path of known) {
+      if (!selectedSet.has(path) && this.tabs.has(path)) {
+        await this.closeTabPath(path);
+      }
+    }
+
+    let first = true;
+    for (const path of selected) {
+      if (!this.tabs.has(path)) {
+        await this.openDocument(path, { background: !first });
+        first = false;
+      }
+    }
+
+    this.folderModal.hide();
   }
 
   // -- rendering ------------------------------------------------------------
@@ -307,6 +437,7 @@ class AppState {
       item.setAttribute("tabindex", "0");
       if (tab.path === this.activePath) item.classList.add("active");
       if (tab.hasUnreadUpdate) item.classList.add("has-update");
+      if (tab.deletedOnDisk) item.classList.add("deleted");
       item.addEventListener("click", () => this.setActiveTab(tab.path));
       item.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -321,7 +452,9 @@ class AppState {
       const title = document.createElement("span");
       title.className = "tab-title";
       title.textContent = tab.filename;
-      title.title = tab.path;
+      title.title = tab.deletedOnDisk
+        ? `${tab.path} (deleted on disk)`
+        : tab.path;
 
       const close = document.createElement("span");
       close.className = "tab-close";
@@ -376,6 +509,16 @@ class AppState {
 
       if (raw !== null && this.preferences.frontmatterVisible) {
         this.metadata.mount(parseFrontmatterRows(raw));
+        if (wasTailing) {
+          this.contentContainer.scrollTop = this.contentContainer.scrollHeight;
+        }
+      }
+
+      if (tab.deletedOnDisk) {
+        const banner = document.createElement("p");
+        banner.className = "deleted-banner";
+        banner.textContent = "This file was deleted on disk.";
+        this.viewer.prepend(banner);
         if (wasTailing) {
           this.contentContainer.scrollTop = this.contentContainer.scrollHeight;
         }

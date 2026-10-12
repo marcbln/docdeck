@@ -76,4 +76,43 @@ mod tests {
         state.unwatch_file(&a).unwrap();
         assert_eq!(watched(&state), vec![b.to_string_lossy().to_string()]);
     }
+
+    #[test]
+    fn watch_roots_registers_directories_idempotently() {
+        let dir = tempdir().unwrap();
+        let state = WatcherState::new();
+
+        state.watch_roots(&[dir.path().to_path_buf()]).unwrap();
+        state.watch_roots(&[dir.path().to_path_buf()]).unwrap();
+
+        assert_eq!(state.watched_roots.lock().unwrap().len(), 1);
+        assert!(state.watched_roots.lock().unwrap().contains(dir.path()));
+    }
+
+    #[test]
+    fn tracks_several_roots() {
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        let state = WatcherState::new();
+
+        state
+            .watch_roots(&[first.path().to_path_buf(), second.path().to_path_buf()])
+            .unwrap();
+
+        assert_eq!(state.watched_roots.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn file_and_root_registries_are_independent() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("plan.md");
+        File::create(&file_path).unwrap();
+
+        let state = WatcherState::new();
+        state.watch_file(&file_path).unwrap();
+        state.watch_roots(&[dir.path().to_path_buf()]).unwrap();
+
+        assert_eq!(state.watched_paths.lock().unwrap().len(), 1);
+        assert_eq!(state.watched_roots.lock().unwrap().len(), 1);
+    }
 }

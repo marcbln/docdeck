@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Watched folder roots: `docdeck ./_ai` opens a checkbox picker of every Markdown
+  document in the tree, then starts a recursive watch. New and edited files open
+  in background tabs with the unread dot; deleted files keep their tab with a
+  "deleted on disk" marker that clears when the file reappears. Directory watches
+  also follow atomic write-to-temp-then-rename saves that the previous per-file
+  watch missed. Multiple folder arguments are supported and rerunning the CLI on
+  a watched folder reopens the picker with open documents pre-checked.
+- `scripts/simulate_folder_watch.sh` end-to-end harness for folder mode.
+- Copy button on every code block: a hover-revealed button puts the snippet's
+  plain source on the clipboard and confirms with a checkmark, falling back to
+  `execCommand` on webviews without the async Clipboard API. Mermaid diagrams are
+  skipped — their source was already replaced by the rendered SVG.
 - Frontmatter metadata table: YAML headers render as a collapsible two-column
   table instead of raw markdown prose, with nested keys indented, lists
   stringified inline and malformed YAML degrading to a raw-text row rather than
@@ -21,10 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Changed
+- Watcher events are now batched and typed (`paths-changed` carrying
+  `{path, exists}`); the single-instance event is `open-path-cli` carrying
+  `{path, is_dir}`.
 - `npm test` now runs the Rust suite and the frontend vitest suite in sequence.
 - Frontend logic is split into focused modules (`frontmatter`, `toc`,
-  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`) with
-  `main.ts` reduced to orchestration.
+  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`, `copy-code`)
+  with `main.ts` reduced to orchestration.
 
 ## [0.1.0] - 2026-10-01
 

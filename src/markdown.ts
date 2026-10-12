@@ -6,6 +6,7 @@ import { markedHighlight } from "marked-highlight";
 import hljs from "highlight.js/lib/common";
 import mermaid from "mermaid";
 
+import { mountCopyButtons } from "./copy-code";
 import type { ThemeMode } from "./preferences";
 import { LIGHT_MERMAID_VARIABLES } from "./theme";
 import type { Heading } from "./toc";
@@ -157,6 +158,11 @@ export async function renderMarkdown(
       console.error("Mermaid rendering failed", error);
     }
   }
+
+  // Copy buttons go on last: mermaid promotion above already replaced
+  // `pre > code.language-mermaid` with a diagram container, so a diagram never
+  // gets a button offering to copy the source that was swapped for an SVG.
+  mountCopyButtons(targetEl);
 
   if (scrollParent) {
     scrollParent.scrollTop = wasTailing
