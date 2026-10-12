@@ -43,6 +43,13 @@ BIN_SRC="src-tauri/target/release/$APP_NAME"
 command -v npm >/dev/null || { printf 'error: npm not found\n' >&2; exit 1; }
 command -v cargo >/dev/null || { printf 'error: cargo not found\n' >&2; exit 1; }
 
+# `tauri` is a devDependency, so `npm run tauri` only works once node_modules
+# exists. Install on demand instead of failing with "tauri: command not found".
+if [[ ! -x node_modules/.bin/tauri ]]; then
+  printf '==> Installing npm dependencies...\n'
+  npm install
+fi
+
 if [[ $BUILD -eq 1 ]]; then
   printf '==> Building %s (release)...\n' "$APP_NAME"
   npm run tauri build -- --no-bundle
