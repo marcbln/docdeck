@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::paths::ExcludeSet;
     use crate::watcher::WatcherState;
     use std::fs::File;
     use std::io::Write;
@@ -114,5 +115,35 @@ mod tests {
 
         assert_eq!(state.watched_paths.lock().unwrap().len(), 1);
         assert_eq!(state.watched_roots.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pinned_file_survives_tab_close() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("config_notes.md");
+        File::create(&file_path).unwrap();
+
+        let state = WatcherState::new();
+        state.pin_file(&file_path).unwrap();
+        state.unwatch_file(&file_path).unwrap();
+
+        assert!(state.watched_paths.lock().unwrap().contains(&file_path));
+    }
+
+    #[test]
+    fn excludes_are_stored_and_returned() {
+        let state = WatcherState::new();
+        let (excludes, warnings) =
+            ExcludeSet::build_lenient(&["**/archive/**".to_string()], std::path::Path::new("/tmp"));
+        assert!(warnings.is_empty());
+
+        state.set_excludes(excludes).unwrap();
+
+        assert!(state
+            .excludes()
+            .is_excluded(std::path::Path::new("/tmp/archive/x.md")));
+        assert!(!state
+            .excludes()
+            .is_excluded(std::path::Path::new("/tmp/current/x.md")));
     }
 }

@@ -4,14 +4,89 @@
 //! docdeck cares about* can be unit tested without an event loop or a window.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 /// A CLI argument that resolved to a real path, tagged so the frontend can
-/// branch between "open this document" and "show the folder picker".
+/// branch between "open this document" and "watch this folder".
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CliEntry {
     pub path: String,
     pub is_dir: bool,
+}
+
+/// Directory names that are never traversed or surfaced, whatever a selector
+/// says. `~/devel/*` would otherwise walk every build tree on a fresh config.
+pub const NOISE_DIRS: &[&str] = &["node_modules", "target", "dist", "build", ".venv", "venv"];
+
+/// Compiled `exclude` patterns. An empty set matches nothing; an invalid
+/// pattern is dropped with a warning rather than failing the whole config.
+#[derive(Debug, Clone)]
+pub struct ExcludeSet {
+    matcher: GlobSet,
+}
+
+impl Default for ExcludeSet {
+    fn default() -> Self {
+        Self {
+            matcher: GlobSet::empty(),
+        }
+    }
+}
+
+impl ExcludeSet {
+    /// Compiles every valid pattern and reports the rest.
+    ///
+    /// Relative patterns resolve against `home`, matching the `watch` array, so
+    /// a config can use `exclude = ["**/archive/**"]` without repeating `~`.
+    pub fn build_lenient(patterns: &[String], home: &Path) -> (Self, Vec<String>) {
+        let mut builder = GlobSetBuilder::new();
+        let mut warnings = Vec::new();
+        let mut any = false;
+
+        for pattern in patterns {
+            let expanded = expand_tilde(pattern, home);
+            match GlobBuilder::new(&expanded.to_string_lossy())
+                .literal_separator(true)
+                .build()
+            {
+                Ok(glob) => {
+                    builder.add(glob);
+                    any = true;
+                }
+                Err(error) => {
+                    warnings.push(format!("exclude pattern \"{pattern}\" ignored: {error}"));
+                }
+            }
+        }
+
+        let matcher = if any {
+            builder.build().unwrap_or_else(|_| GlobSet::empty())
+        } else {
+            GlobSet::empty()
+        };
+
+        (Self { matcher }, warnings)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.matcher.is_empty()
+    }
+
+    /// Whether `path` or any ancestor matches an exclude pattern.
+    ///
+    /// The ancestor check is what makes `exclude = ["~/devel/legacy"]` exclude
+    /// the whole subtree from both the scan and watcher events, not just the
+    /// directory entry itself.
+    pub fn is_excluded(&self, path: &Path) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        path.ancestors()
+            .any(|candidate| self.matcher.is_match(candidate))
+    }
 }
 
 /// Whether a path's extension marks it as a Markdown document.
@@ -36,20 +111,94 @@ pub fn is_under_any(path: &Path, roots: &HashSet<PathBuf>) -> bool {
 
 /// Whether a settled filesystem event concerns something the UI cares about.
 ///
-/// Explicitly opened files are always relevant, whatever their extension —
-/// docdeck can render any document handed to it on the CLI. Inside a watched
-/// root only existing Markdown files are relevant; anything else (`.gitkeep`,
-/// editor droppings, directories) is background noise. The `is_file` check also
-/// filters delete events for files that were never opened, which have nothing
-/// to mark.
-pub fn is_relevant(path: &Path, files: &HashSet<PathBuf>, roots: &HashSet<PathBuf>) -> bool {
-    files.contains(path) || (path.is_file() && is_markdown(path) && is_under_any(path, roots))
+/// Explicitly opened or config-pinned files are always relevant, whatever
+/// their extension. Inside a watched root only Markdown paths are relevant, and
+/// only when no component *below the root* is hidden, a backup or a noise
+/// directory and no exclude pattern matches. Checking noise below the root
+/// (not over the absolute path) keeps a deliberately hidden root such as
+/// `~/.notes` watchable.
+///
+/// A Markdown path that no longer exists is still relevant: it may have been
+/// an inbox row that was never opened, and the frontend needs the delete event
+/// to strike that row through. The frontend ignores deletes for paths it is not
+/// tracking.
+pub fn is_relevant(
+    path: &Path,
+    files: &HashSet<PathBuf>,
+    roots: &HashSet<PathBuf>,
+    excludes: &ExcludeSet,
+) -> bool {
+    if files.contains(path) {
+        return true;
+    }
+    if !is_markdown(path) || !is_under_any(path, roots) {
+        return false;
+    }
+    roots.iter().any(|root| {
+        is_under(path, root)
+            && !has_ignored_component_below(path, root)
+            && !excludes.is_excluded(path)
+    })
 }
 
-/// Directory entries the folder scanner skips: hidden entries (`.git`,
+/// Directory entries the scanner always skips: hidden entries (`.git`,
 /// `.gitkeep`) and editor backup files (`plan.md~`).
 pub fn is_ignored_name(name: &str) -> bool {
     name.starts_with('.') || name.ends_with('~')
+}
+
+/// Built-in noise directories (`node_modules`, `target`, ...).
+pub fn is_noise_name(name: &str) -> bool {
+    NOISE_DIRS.contains(&name)
+}
+
+/// Whether any component below `root` is hidden, a backup or a noise
+/// directory. The root itself is never inspected, so the rule that hides
+/// `.git` does not make an explicitly configured hidden root unwatchable.
+pub fn has_ignored_component_below(path: &Path, root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    relative.components().any(|component| match component {
+        Component::Normal(name) => {
+            let name = name.to_string_lossy();
+            is_ignored_name(&name) || is_noise_name(&name)
+        }
+        _ => false,
+    })
+}
+
+/// Expands a leading `~` and resolves relative selectors against `home`.
+///
+/// `home` is passed in instead of read from the environment so expansion is a
+/// pure function and tests control both the home directory and the filesystem.
+pub fn expand_tilde(selector: &str, home: &Path) -> PathBuf {
+    if selector == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = selector.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    let path = Path::new(selector);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        home.join(path)
+    }
+}
+
+/// Modification time in milliseconds since the Unix epoch.
+///
+/// Used by the inventory and by watcher events; `None` means the path vanished
+/// between the event and the stat, which the frontend treats as a delete.
+pub fn modified_millis(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis() as u64)
 }
 
 /// Filters flag-style arguments and canonicalizes the rest.

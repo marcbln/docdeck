@@ -20,11 +20,13 @@ describe("loadPreferences", () => {
       themeMode: "light",
       tocVisible: true,
       frontmatterVisible: false,
+      inboxVisible: false,
     });
     expect(loadPreferences()).toEqual({
       themeMode: "light",
       tocVisible: true,
       frontmatterVisible: false,
+      inboxVisible: false,
     });
   });
 
@@ -60,5 +62,18 @@ describe("loadPreferences", () => {
       JSON.stringify({ version: 1, themeMode: "solarized" }),
     );
     expect(loadPreferences().themeMode).toBe("dark");
+  });
+
+  it("defaults inboxVisible to true for stored objects from before the field", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "dark",
+        tocVisible: false,
+        frontmatterVisible: true,
+      }),
+    );
+    expect(loadPreferences().inboxVisible).toBe(true);
   });
 });

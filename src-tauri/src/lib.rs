@@ -1,11 +1,14 @@
 //! Application wiring: builder, single-instance IPC, plugin setup.
 
 mod commands;
+mod config;
 mod folder;
 mod paths;
 mod render;
 mod watcher;
 
+#[cfg(test)]
+mod config_test;
 #[cfg(test)]
 mod folder_test;
 #[cfg(test)]
@@ -71,8 +74,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::load_file,
             commands::close_file,
-            commands::scan_folder,
-            commands::watch_folders,
+            commands::load_watches,
+            commands::add_watch,
             startup_paths
         ])
         .run(tauri::generate_context!())

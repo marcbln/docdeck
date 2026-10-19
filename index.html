@@ -16,6 +16,9 @@
           <button id="toggle-autosort-btn" title="Toggle Auto-sort by Last Modified">
             &#9889; Auto-Sort: OFF
           </button>
+          <button id="toggle-inbox-btn" title="Toggle File Inbox">
+            &#9993; Inbox: ON
+          </button>
           <button id="toggle-toc-btn" title="Toggle Table of Contents">
             &#9776; Outline: OFF
           </button>
@@ -29,13 +32,15 @@
       </header>
 
       <nav id="tabs-bar" class="tabs-container"></nav>
+      <aside id="inbox-panel" aria-label="File inbox"></aside>
       <nav id="toc-panel" hidden aria-label="Table of contents"></nav>
 
       <main id="content-container">
         <div id="empty-state" class="empty-placeholder">
           <p>
-            No document loaded. Run <code>docdeck &lt;file.md&gt;</code> or
-            <code>docdeck &lt;folder&gt;</code> to watch a Markdown tree.
+            No document loaded. Pick one from the Inbox, watch folders via
+            <code>~/.config/docdeck/config.toml</code>, or run
+            <code>docdeck &lt;file.md&gt;</code>.
           </p>
         </div>
         <article id="markdown-viewer" class="markdown-body hidden"></article>

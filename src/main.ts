@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
-import { FolderModal } from "./folder-modal";
+import { InboxModel, type InboxSeed } from "./inbox-model";
+import { InboxPanel, type InboxStatus } from "./inbox-panel";
 import {
   applyMermaidTheme,
   isTailing,
@@ -16,6 +17,7 @@ import {
   type Preferences,
   type ThemeMode,
 } from "./preferences";
+import { fileName, isUnderAny } from "./project";
 import { createToggleButton } from "./toolbar";
 import { extractHeadings } from "./toc";
 import { TocPanel } from "./toc-panel";
@@ -38,12 +40,40 @@ interface CliEntry {
 interface PathChange {
   path: string;
   exists: boolean;
+  modifiedTime?: number;
 }
 
-/** A watched root and the Markdown documents found beneath it. */
-interface FolderScan {
-  root: string;
-  files: string[];
+/** One inbox row as returned by `load_watches` / `add_watch`. */
+interface InboxEntryPayload {
+  path: string;
+  filename: string;
+  modifiedTime: number;
+}
+
+/** The startup config result. `error` means no watches were registered. */
+interface WatchLoad {
+  configPath: string;
+  configFound: boolean;
+  roots: string[];
+  entries: InboxEntryPayload[];
+  warnings: string[];
+  error: string | null;
+  truncated: boolean;
+}
+
+/** The result of adding session watches for CLI folders. */
+interface WatchAdded {
+  roots: string[];
+  entries: InboxEntryPayload[];
+  warnings: string[];
+}
+
+function toSeed(entry: InboxEntryPayload): InboxSeed {
+  return {
+    path: entry.path,
+    filename: entry.filename,
+    modifiedTime: entry.modifiedTime,
+  };
 }
 
 interface Tab {
@@ -89,9 +119,22 @@ class AppState {
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
 
-  /** Roots shown in the picker but not yet confirmed; reset on cancel/confirm. */
-  private readonly pendingRoots = new Set<string>();
-  private readonly folderModal: FolderModal;
+  /** Roots registered from the config or a CLI folder for this session. */
+  private readonly watchRoots = new Set<string>();
+  private readonly inbox = new InboxModel();
+  private inboxStatus: InboxStatus = {
+    configPath: "",
+    configFound: true,
+    error: null,
+    warnings: [],
+    truncated: false,
+    loading: true,
+  };
+  /** The tab currently playing the brief active-write pulse, if any. */
+  private activeUpdatePath: string | null = null;
+  private activeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly inboxPanelEl = must<HTMLElement>("inbox-panel");
+  private readonly inboxPanel: InboxPanel;
 
   constructor() {
     this.metadata = new MetadataView(
@@ -110,21 +153,24 @@ class AppState {
       onModeApplied: () => void this.renderActiveContent(),
     });
 
-    this.folderModal = new FolderModal({
-      isOpen: (path) => this.tabs.has(path),
-      onConfirm: (selected, known) => this.confirmFolders(selected, known),
-      onCancel: () => this.pendingRoots.clear(),
+    this.inboxPanel = new InboxPanel(this.inboxPanelEl, {
+      onOpen: (path) => {
+        if (this.tabs.has(path)) this.setActiveTab(path);
+        else void this.openDocument(path);
+      },
     });
 
     this.applyPreferencesToUi();
     this.bindControls();
     this.theme.apply(this.preferences.themeMode);
+    this.renderInbox();
     void this.start();
   }
 
   /** Applies the restored preferences before any control is clicked. */
   private applyPreferencesToUi(): void {
     this.tocPanelEl.hidden = !this.preferences.tocVisible;
+    this.inboxPanelEl.hidden = !this.preferences.inboxVisible;
   }
 
   private persist(): void {
@@ -143,15 +189,16 @@ class AppState {
   private async loadStartupPaths(): Promise<void> {
     try {
       const entries = await invoke<CliEntry[]>("startup_paths");
-      const folders = entries
-        .filter((entry) => entry.is_dir)
-        .map((entry) => entry.path);
+      const folders = entries.filter((entry) => entry.is_dir).map((entry) => entry.path);
+
+      // Config first: its excludes must be installed before a session folder
+      // is scanned, or the two sources would disagree about what is noise.
+      await this.loadWatchConfig();
+      if (folders.length > 0) await this.addWatch(folders);
 
       for (const entry of entries) {
         if (!entry.is_dir) await this.openDocument(entry.path);
       }
-
-      if (folders.length > 0) void this.showFolderModal(folders);
     } catch (error) {
       console.error("Failed to read startup paths", error);
     }
@@ -173,6 +220,20 @@ class AppState {
         this.autoSort ? "ON" : "OFF"
       }`;
       this.renderTabs();
+    });
+
+    createToggleButton({
+      element: must<HTMLButtonElement>("toggle-inbox-btn"),
+      icon: "✉",
+      label: "Inbox",
+      tooltip: "Toggle File Inbox",
+      initialState: this.preferences.inboxVisible,
+      formatLabel: (state) => (state ? "ON" : "OFF"),
+      onChange: (next) => {
+        this.preferences.inboxVisible = next;
+        this.inboxPanelEl.hidden = !next;
+        this.persist();
+      },
     });
 
     createToggleButton({
@@ -223,9 +284,10 @@ class AppState {
 
   private async bindBackend(): Promise<void> {
     try {
-      // A second `docdeck <path>` in another shell. Folders reopen the picker.
+      // A second `docdeck <path>` in another shell. Folders join the session
+      // watch registry; files open a tab.
       await listen<CliEntry>("open-path-cli", (event) => {
-        if (event.payload.is_dir) void this.showFolderModal([event.payload.path]);
+        if (event.payload.is_dir) void this.addWatch([event.payload.path]);
         else void this.openDocument(event.payload.path);
       });
 
@@ -241,10 +303,7 @@ class AppState {
 
   // -- document lifecycle ---------------------------------------------------
 
-  public async openDocument(
-    rawPath: string,
-    options: { background?: boolean } = {},
-  ): Promise<void> {
+  public async openDocument(rawPath: string): Promise<void> {
     try {
       const data = await invoke<FilePayload>("load_file", { pathStr: rawPath });
 
@@ -260,50 +319,57 @@ class AppState {
           filename: data.filename,
           content: data.content,
           modifiedTime: data.modified_time,
-          hasUnreadUpdate: options.background === true,
+          hasUnreadUpdate: false,
           deletedOnDisk: false,
         });
       }
 
-      if (options.background && this.activePath !== null) {
-        // Never steal focus from the document being read.
-        this.renderTabs();
-        if (this.activePath === data.path) await this.renderActiveContent();
-      } else {
-        this.setActiveTab(data.path);
-      }
+      this.setActiveTab(data.path);
     } catch (error) {
       console.error(`Failed to load file: ${rawPath}`, error);
-      // A background auto-open can lose the race against a delete; that is
-      // routine, not an error worth interrupting the reader for.
-      if (!options.background) this.showMessage(`Could not open ${rawPath}`);
+      // A row can lose the race against a delete; that is routine, not an
+      // error worth interrupting the reader for.
+      this.showMessage(`Could not open ${rawPath}`);
     }
   }
 
   /**
    * Handles one settled watcher event.
    *
-   * Deleted files keep their tab (content included) and get a marker, so a
-   * document replaced mid-read does not silently vanish. Everything that
-   * exists is either reloaded or opened in the background — focus is never
-   * taken.
+   * Deleted files keep their tab (content included) and get a marker; their
+   * inbox row is struck through until the file reappears. Existing files
+   * reload their tab when one is open and update the inbox row. Nothing is
+   * ever opened automatically: the inbox is the triage surface.
    */
   private async applyPathChange(change: PathChange): Promise<void> {
     const tab = this.tabs.get(change.path);
+    const isActive = this.activePath === change.path;
+    const tracked =
+      this.inbox.has(change.path) || isUnderAny(change.path, this.watchRoots);
 
     if (!change.exists) {
-      if (!tab || tab.deletedOnDisk) return;
-      tab.deletedOnDisk = true;
-      this.renderTabs();
-      if (this.activePath === change.path) await this.renderActiveContent();
+      if (tab && !tab.deletedOnDisk) {
+        tab.deletedOnDisk = true;
+        this.renderTabs();
+        if (isActive) await this.renderActiveContent();
+      }
+      if (tracked && this.inbox.markDeleted(change.path)) this.renderInbox();
       return;
     }
 
-    if (tab) {
-      await this.reloadDocument(change.path);
-    } else {
-      await this.openDocument(change.path, { background: true });
+    if (tracked) {
+      const seed: InboxSeed = {
+        path: change.path,
+        filename: fileName(change.path),
+        modifiedTime: change.modifiedTime ?? Date.now(),
+      };
+      // The active document is on screen already: update its mtime and order
+      // without pretending the reader missed something.
+      this.inbox.upsert(seed, !isActive);
+      this.renderInbox();
     }
+
+    if (tab) await this.reloadDocument(change.path);
   }
 
   private async reloadDocument(path: string): Promise<void> {
@@ -322,8 +388,10 @@ class AppState {
       tab.deletedOnDisk = false;
 
       if (this.activePath === path) {
-        // Reading this tab, so the change is not "unread" — paint it straight away.
+        // Reading this tab: paint it straight away and acknowledge with the
+        // brief pulse instead of the unread dot.
         tab.hasUnreadUpdate = false;
+        this.flashActiveTab(path);
       } else {
         tab.hasUnreadUpdate = true;
       }
@@ -337,12 +405,33 @@ class AppState {
     }
   }
 
+  /** Pulses a tab's dot once for an active-document write, then clears it. */
+  private flashActiveTab(path: string): void {
+    if (this.activeUpdateTimer !== null) clearTimeout(this.activeUpdateTimer);
+    this.activeUpdatePath = path;
+    this.renderTabs();
+    this.activeUpdateTimer = setTimeout(() => {
+      this.activeUpdateTimer = null;
+      this.activeUpdatePath = null;
+      this.renderTabs();
+    }, 2500);
+  }
+
   public setActiveTab(path: string): void {
     this.activePath = path;
     const tab = this.tabs.get(path);
     if (tab) tab.hasUnreadUpdate = false;
 
+    if (this.activeUpdatePath !== null && this.activeUpdatePath !== path) {
+      if (this.activeUpdateTimer !== null) clearTimeout(this.activeUpdateTimer);
+      this.activeUpdateTimer = null;
+      this.activeUpdatePath = null;
+    }
+
+    this.inbox.markRead(path);
+
     this.renderTabs();
+    this.renderInbox();
     void this.renderActiveContent();
   }
 
@@ -356,12 +445,19 @@ class AppState {
     this.tabs.delete(path);
     this.reloadTokens.delete(path);
 
+    if (this.activeUpdatePath === path && this.activeUpdateTimer !== null) {
+      clearTimeout(this.activeUpdateTimer);
+      this.activeUpdateTimer = null;
+      this.activeUpdatePath = null;
+    }
+
     if (this.activePath === path) {
       const remaining = [...this.tabs.keys()];
       this.activePath = remaining[remaining.length - 1] ?? null;
     }
 
     this.renderTabs();
+    this.renderInbox();
     await this.renderActiveContent();
   }
 
@@ -370,54 +466,61 @@ class AppState {
     await this.closeTabPath(path);
   }
 
-  // -- folder watching -------------------------------------------------------
+  // -- watch registry and inbox ---------------------------------------------
 
-  /** Scans each root and opens the picker; safe to call repeatedly. */
-  private async showFolderModal(roots: string[]): Promise<void> {
-    for (const root of roots) this.pendingRoots.add(root);
-    this.folderModal.show();
-
-    for (const root of roots) {
-      try {
-        const scan = await invoke<FolderScan>("scan_folder", { pathStr: root });
-        this.folderModal.addRoot(scan.root, scan.files);
-      } catch (error) {
-        console.error(`Failed to scan folder ${root}`, error);
-        this.folderModal.setRootError(root, "Could not scan this folder.");
-      }
+  /** Loads the global config and turns it into watches plus inbox rows. */
+  private async loadWatchConfig(): Promise<void> {
+    this.renderInbox();
+    try {
+      const result = await invoke<WatchLoad>("load_watches");
+      for (const root of result.roots) this.watchRoots.add(root);
+      this.inbox.replace(result.entries.map(toSeed));
+      this.inboxStatus = {
+        configPath: result.configPath,
+        configFound: result.configFound,
+        error: result.error,
+        warnings: result.warnings,
+        truncated: result.truncated,
+        loading: false,
+      };
+    } catch (error) {
+      console.error("Failed to load watch config", error);
+      this.inboxStatus = {
+        configPath: "",
+        configFound: false,
+        error: String(error),
+        warnings: [],
+        truncated: false,
+        loading: false,
+      };
     }
+    this.renderInbox();
   }
 
-  private async confirmFolders(selected: string[], known: string[]): Promise<void> {
-    const roots = [...this.pendingRoots];
-
+  /** Registers session watches for CLI folder arguments. */
+  private async addWatch(paths: string[]): Promise<void> {
     try {
-      await invoke("watch_folders", { paths: roots });
+      const result = await invoke<WatchAdded>("add_watch", { paths });
+      for (const root of result.roots) this.watchRoots.add(root);
+      this.inbox.merge(result.entries.map(toSeed));
+      this.inboxStatus.warnings = [...this.inboxStatus.warnings, ...result.warnings];
     } catch (error) {
-      console.error("Failed to start folder watch", error);
-      return; // Keep the modal open so the user can retry or cancel.
+      console.error("Failed to add watch", error);
+      this.inboxStatus.warnings = [
+        ...this.inboxStatus.warnings,
+        `Could not watch folder: ${String(error)}`,
+      ];
     }
+    this.renderInbox();
+  }
 
-    this.pendingRoots.clear();
-
-    // Unchecking closes; checking opens. Tabs outside the picker are untouched
-    // because `known` only ever contains files the modal displayed.
-    const selectedSet = new Set(selected);
-    for (const path of known) {
-      if (!selectedSet.has(path) && this.tabs.has(path)) {
-        await this.closeTabPath(path);
-      }
-    }
-
-    let first = true;
-    for (const path of selected) {
-      if (!this.tabs.has(path)) {
-        await this.openDocument(path, { background: !first });
-        first = false;
-      }
-    }
-
-    this.folderModal.hide();
+  private renderInbox(): void {
+    this.inboxPanel.render(
+      this.inbox.entriesSorted(),
+      this.inboxStatus,
+      new Set(this.tabs.keys()),
+      this.activePath,
+    );
   }
 
   // -- rendering ------------------------------------------------------------
@@ -437,6 +540,7 @@ class AppState {
       item.setAttribute("tabindex", "0");
       if (tab.path === this.activePath) item.classList.add("active");
       if (tab.hasUnreadUpdate) item.classList.add("has-update");
+      if (tab.path === this.activeUpdatePath) item.classList.add("active-update");
       if (tab.deletedOnDisk) item.classList.add("deleted");
       item.addEventListener("click", () => this.setActiveTab(tab.path));
       item.addEventListener("keydown", (event) => {

@@ -10,12 +10,14 @@ export interface Preferences {
   themeMode: ThemeMode;
   tocVisible: boolean;
   frontmatterVisible: boolean;
+  inboxVisible: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   themeMode: "dark",
   tocVisible: false,
   frontmatterVisible: true,
+  inboxVisible: true,
 });
 
 function isThemeMode(value: unknown): value is ThemeMode {
@@ -58,6 +60,10 @@ function decode(raw: string | null): Preferences {
       typeof record.frontmatterVisible === "boolean"
         ? record.frontmatterVisible
         : DEFAULT_PREFERENCES.frontmatterVisible,
+    inboxVisible:
+      typeof record.inboxVisible === "boolean"
+        ? record.inboxVisible
+        : DEFAULT_PREFERENCES.inboxVisible,
   };
 }
 
