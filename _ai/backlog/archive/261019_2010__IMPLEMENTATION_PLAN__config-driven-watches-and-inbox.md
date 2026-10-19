@@ -3,7 +3,8 @@ filename: "_ai/backlog/active/261019_2010__IMPLEMENTATION_PLAN__config-driven-wa
 title: "Config-driven watches and the Thunderbird-style file inbox"
 createdAt: 2026-10-19 20:10
 updatedAt: 2026-10-19 20:10
-status: draft
+status: completed
+completedAt: 2026-10-20 00:17
 priority: high
 tags: [config, watcher, inbox, unread, ux, glob]
 estimatedComplexity: complex
@@ -3803,6 +3804,7 @@ updatedAt: <end time>
 planFile: "_ai/backlog/active/261019_2010__IMPLEMENTATION_PLAN__config-driven-watches-and-inbox.md"
 project: "docdeck"
 status: completed
+completedAt: 2026-10-20 00:17
 filesCreated: <count>
 filesModified: <count>
 filesDeleted: 4
