@@ -8,14 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Watched folder roots: `docdeck ./_ai` opens a checkbox picker of every Markdown
-  document in the tree, then starts a recursive watch. New and edited files open
-  in background tabs with the unread dot; deleted files keep their tab with a
-  "deleted on disk" marker that clears when the file reappears. Directory watches
-  also follow atomic write-to-temp-then-rename saves that the previous per-file
-  watch missed. Multiple folder arguments are supported and rerunning the CLI on
-  a watched folder reopens the picker with open documents pre-checked.
-- `scripts/simulate_folder_watch.sh` end-to-end harness for folder mode.
+- Config-driven watch registry: `~/.config/docdeck/config.toml` (XDG-aware,
+  `$DOCDECK_CONFIG` overrides) with `watch` and `exclude` arrays. Selectors
+  support `~`, `*` (one segment) and `**` (any depth); matched directories
+  contribute recursive `*.md` trees and matched files are watched whatever
+  their extension. Hidden entries, symlinks, `node_modules`, `target`, `dist`,
+  `build`, `.venv` and `venv` are always skipped; expansion is capped at 256
+  roots and 10,000 files with visible warnings.
+- Thunderbird-style **Inbox** panel: collapsible left panel (header toggle,
+  visible by default, persisted as `inboxVisible`) listing every matched file
+  newest-first with a project chip for `_ai` paths, compacted parent path and
+  relative time. Session-scoped unread: files changed since startup are bold
+  with an amber dot until opened or activated; new files appear bold without
+  opening a tab; deleted files keep a struck-through row until they reappear.
+  Writes to the active document pulse the tab dot briefly without going bold.
+- `load_watches` and `add_watch` commands; watcher events now carry
+  `modifiedTime`, and the watcher applies exclude patterns to every event.
+  CLI folder arguments add session watches that feed the inbox.
+- `scripts/simulate_folder_watch.sh` end-to-end harness for config-driven
+  watches, session folders and inbox transitions.
 - Copy button on every code block: a hover-revealed button puts the snippet's
   plain source on the clipboard and confirms with a checkmark, falling back to
   `execCommand` on webviews without the async Clipboard API. Mermaid diagrams are
@@ -40,13 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cwd`.
 
 ### Changed
+- CLI folder arguments no longer open a picker or auto-open tabs: a folder adds
+  a session watch and its files appear in the inbox; a file argument opens a
+  tab. New and modified files are never opened automatically.
 - Watcher events are now batched and typed (`paths-changed` carrying
-  `{path, exists}`); the single-instance event is `open-path-cli` carrying
-  `{path, is_dir}`.
+  `{path, exists, modifiedTime}`); the single-instance event is `open-path-cli`
+  carrying `{path, is_dir}`.
 - `npm test` now runs the Rust suite and the frontend vitest suite in sequence.
 - Frontend logic is split into focused modules (`frontmatter`, `toc`,
-  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`, `copy-code`)
-  with `main.ts` reduced to orchestration.
+  `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`, `copy-code`,
+  `project`, `relative-time`, `inbox-model`, `inbox-panel`) with `main.ts`
+  reduced to orchestration.
+
+### Removed
+- Folder picker modal and file tree (`folder-modal`, `file-tree`), the
+  `scan_folder` and `watch_folders` commands, and their CSS.
 
 ## [0.1.0] - 2026-10-01
 

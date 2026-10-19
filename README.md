@@ -12,14 +12,18 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 
 ## Features
 
-- **Watched folder roots** — point docdeck at a directory (`docdeck ./_ai`) and a
-  picker lists every Markdown document in the tree. Confirming starts a recursive
-  watch, so documents an agent creates or rewrites appear on their own in
-  background tabs.
-- **Live file watch** — a debounced `inotify` watcher (300 ms) picks up external
-  writes and repaints the open document.
-- **Unread update indicator** — a tab touched by an agent while you are reading
-  elsewhere gets an amber pulsing dot.
+- **Config-driven watch registry** — `~/.config/docdeck/config.toml` lists
+  folders and files with wildcards (`~/devel/*/_ai`, `~/notes/**/*.md`).
+  Matching folders become recursive Markdown watches; matching files are watched
+  whatever their extension. Hidden entries, symlinks and build directories are
+  skipped; `exclude` patterns refine the set.
+- **File inbox** — every matched document in one list, newest first, with a
+  project chip, compacted parent path and relative time. Files changed since
+  docdeck started are bold until opened; deleted files keep a struck-through
+  row until they reappear. New files appear bold without stealing a tab.
+- **Unread tab indicator** — a background tab touched by an agent keeps its
+  amber pulsing dot until activated; writing to the active tab pulses the dot
+  briefly and fades.
 - **Top tabs or left sidebar** — toggle the tab bar between a horizontal strip and
   a vertical rail for deep directory trees.
 - **Auto-sort by last update** — bump the documents an agent just touched to the top.
@@ -76,39 +80,67 @@ docdeck plan_a.md plan_b.md /tmp/agent_output.md
 # Add a document to the window that is already running
 docdeck ./reports/agent_status.md
 
-# Watch a whole agent workspace: pick files, stay subscribed
+# Add a folder to this session's watches
 docdeck ./_ai
-
-# Mix folders and documents
-docdeck ./_ai notes.md
 ```
 
-Rerunning `docdeck ./_ai` in another terminal reopens the picker in the running
-window with every currently open document pre-checked, so the tree is a living
-selection rather than a one-shot dialog. Checking a file opens it, unchecking it
-closes the tab — closing a tab does **not** stop the folder watch, so the next
-agent edit to that document opens it again in the background.
+## Watching folders on every launch
 
-Documents that are deleted on disk keep their tab and content with a
-"deleted on disk" marker; the marker clears if the file reappears.
+Create `~/.config/docdeck/config.toml` (`$DOCDECK_CONFIG` overrides the path):
+
+```toml
+watch = [
+  "~/devel/*/_ai",        # every project's agent workspace
+  "~/notes/**/*.md",      # every Markdown file under notes
+  "~/journal/today.txt",  # an explicit file, any extension
+]
+exclude = [
+  "**/archive/**",
+  "**/templates/**",
+]
+```
+
+- `~` expands to your home directory; `*` matches one path segment; `**`
+  matches any depth. Relative paths resolve against your home directory.
+- A matched directory contributes its recursive `*.md` tree; a matched file is
+  watched explicitly.
+- Hidden entries, symlinks and `node_modules`, `target`, `dist`, `build`,
+  `.venv`, `venv` are always skipped. `exclude` globs apply on top.
+- The config is read once at startup; restart docdeck after editing it.
+- Expansion is capped at 256 watched roots and 10,000 files; the inbox names
+  any selector that was truncated.
+
+The **Inbox** panel lists every matched file newest-first. Bold filenames with
+an amber dot changed since docdeck started; opening the row or activating its
+tab clears the mark. New files appear bold without opening a tab; deleted files
+keep a struck-through row with their last modification time until they
+reappear or the app restarts. Unread is session-scoped: a restart clears all
+bold, and closing an unread tab does not.
+
+Running `docdeck <folder>` adds that folder as a **session watch** alongside
+the config and lists its files in the same inbox; `docdeck <file>` opens a tab.
+Nothing is opened automatically when a file changes — the inbox is the triage
+surface.
 
 | Control | Action |
 | --- | --- |
 | `⇄ Layout` | Switch the tab bar between top and left sidebar |
 | `⚡ Auto-Sort` | Order tabs by most recently modified |
+| `✉ Inbox` | Show or hide the file inbox |
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
 | `☀ Theme` | Switch between the dark and light palettes |
 | `⧉` on a code block | Copy the snippet's source to the clipboard |
+| Click a row | Open the document (like clicking its tab) |
 | Click a tab | Activate it and clear its unread dot |
 | `×` on a tab | Close it and release its file watch (watched folders stay live) |
 
 ### Preferences
 
-Theme, outline visibility and frontmatter visibility are stored under the
+Theme, outline, frontmatter and inbox visibility are stored under the
 `docdeck.preferences.v1` key in `localStorage`, so docdeck reopens the way you
 left it. Clear that key to reset to defaults (dark theme, outline hidden,
-frontmatter shown).
+frontmatter shown, inbox shown).
 
 ## Development
 
@@ -126,9 +158,10 @@ npm run simulate:folder            # end-to-end folder-watch simulation
 bursts like a running agent would, and prints a verification checklist. See
 [`scripts/simulate_agent_writes.sh`](scripts/simulate_agent_writes.sh).
 
-`npm run simulate:folder` builds a throwaway `_ai`-style tree, launches docdeck
-on the folder, then has a simulated agent create and edit documents inside it.
-See [`scripts/simulate_folder_watch.sh`](scripts/simulate_folder_watch.sh).
+`npm run simulate:folder` builds a throwaway `_ai`-style workspace and config,
+launches docdeck with `DOCDECK_CONFIG` pointing at it, then has a simulated
+agent create, edit, delete and recreate documents inside it. See
+[`scripts/simulate_folder_watch.sh`](scripts/simulate_folder_watch.sh).
 
 ## Architecture
 
@@ -137,8 +170,6 @@ src/                  Frontend — tab state, layout, markdown rendering
   main.ts             AppState: tab registry, CLI events, watcher events, wiring
   markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
   copy-code.ts        Clipboard write with fallback, per-block copy buttons
-  file-tree.ts        Flat absolute paths → nested picker tree
-  folder-modal.ts     Checkbox tree modal, watch + open / cancel actions
   frontmatter.ts      YAML header split + parse into table rows
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
@@ -147,11 +178,16 @@ src/                  Frontend — tab state, layout, markdown rendering
   metadata-jump.ts    Metadata collapsed state and reveal
   toolbar.ts          Reusable toggle button
   preferences.ts      Versioned localStorage persistence
+  project.ts          Path/components helpers: parent, project chip, compaction
+  relative-time.ts    Deterministic short relative timestamps
+  inbox-model.ts      Session unread/deleted state, sorted inbox rows
+  inbox-panel.ts      Inbox DOM renderer, diagnostics and row actions
   style.css           Catppuccin Mocha + Latte, layouts, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
-  commands.rs         load_file / close_file / scan_folder / watch_folders
-  paths.rs            Path predicates and CLI argument classification
+  commands.rs         load_file / close_file / load_watches / add_watch
+  config.rs           TOML parsing, selector expansion, caps and warnings
+  paths.rs            Path predicates, exclusion set, CLI classification
   folder.rs           Recursive Markdown discovery below a root
   watcher.rs          Debounced inotify watcher, file and root registries
   render.rs           WebKit renderer configuration
@@ -164,22 +200,25 @@ only at five `invoke` commands and two events:
 | Direction | Name | Payload |
 | --- | --- | --- |
 | → webview | `open-path-cli` | `{ path, is_dir }` — a forwarded CLI argument |
-| → webview | `paths-changed` | `[{ path, exists }]` — a batch of settled watcher events |
+| → webview | `paths-changed` | `[{ path, exists, modifiedTime }]` — a batch of settled watcher events |
 
 `exists` is sampled after the debounce window closed, which is all the
 classification the UI needs: reload the document, or mark its tab as deleted.
+`modifiedTime` updates inbox ordering and relative times without re-reading the
+document.
 
 ## Known limitations
 
 - **Linux only.** Relies on `inotify` and WebKitGTK.
 - **Renders markdown only.** No editing.
 - **No rename tracking.** A rename surfaces as a remove plus a create: the old
-  tab keeps its content with the "deleted on disk" marker and the new path opens
-  a new tab. (Watched *folders* do survive write-to-temp-then-rename saves,
-  which a purely per-file watch could not follow.)
-- **Folder trees are not persisted.** Roots and the selection exist only for the
-  session that passed them on the CLI; relaunch with the same command to restore
-  them.
+  tab keeps its content with the "deleted on disk" marker while the new path
+  appears as a bold inbox row (no tab opens automatically). (Watched *folders*
+  do survive write-to-temp-then-rename saves, which a purely per-file watch
+  could not follow.)
+- **Config is read once.** Editing `config.toml` requires a restart; there is no
+  live reload or in-app editor. CLI folders are session-only — put them in the
+  config to restore them on the next launch.
 - **Very new directories can need one more write.** A file written into a
   directory created within the same `inotify` burst may be missed until its next
   write.
