@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- The window stays responsive while watched folders are scanned, and the inbox
+  names the path currently being indexed with running folder/file counts.
+  `load_watches` and `add_watch` now walk the filesystem on a blocking worker
+  instead of the main thread, so a deep selector over a large tree (for example
+  `/topdata/**/_ai`) no longer freezes the close button.
+- `docdeck README.md` opens the document before the config scan starts; the tab
+  no longer waits behind a minutes-long selector walk.
 - `docdeck README.md` (a relative path) from a second shell now opens the file
   the caller meant: forwarded CLI arguments are resolved against the sending
   shell's working directory instead of the already-running app's, which

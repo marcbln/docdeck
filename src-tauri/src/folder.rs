@@ -6,6 +6,10 @@ use walkdir::WalkDir;
 
 use crate::paths::{is_ignored_name, is_markdown, is_noise_name, ExcludeSet};
 
+/// Sink for live scan progress: the path just visited, whether it is a
+/// directory, and the number of matching documents found so far.
+pub type ProgressSink<'a> = &'a mut dyn FnMut(&Path, bool, usize);
+
 /// Documents found below a root, plus the diagnostics the scan could not
 /// silently swallow.
 #[derive(Debug, Default)]
@@ -21,10 +25,12 @@ pub struct ScanOutcome {
 /// and the built-in noise directories are skipped; `excludes` removes matches
 /// on top. Unreadable subdirectories become warnings rather than failing the
 /// whole root. `max_files` caps the return value and reports truncation.
-pub fn scan_markdown(
+/// Every visited entry is reported to `progress`.
+pub fn scan_markdown_with_progress(
     root: &Path,
     excludes: &ExcludeSet,
     max_files: usize,
+    progress: ProgressSink<'_>,
 ) -> Result<ScanOutcome, String> {
     if !root.is_dir() {
         return Err(format!("{} is not a directory", root.display()));
@@ -61,10 +67,16 @@ pub fn scan_markdown(
         };
 
         if !entry.file_type().is_file() {
+            progress(
+                entry.path(),
+                entry.file_type().is_dir(),
+                outcome.files.len(),
+            );
             continue;
         }
         let path = entry.path();
         if !is_markdown(path) || excludes.is_excluded(path) {
+            progress(path, false, outcome.files.len());
             continue;
         }
         if outcome.files.len() >= max_files {
@@ -72,6 +84,7 @@ pub fn scan_markdown(
             break;
         }
         outcome.files.push(path.to_path_buf());
+        progress(path, false, outcome.files.len());
     }
 
     outcome.files.sort();

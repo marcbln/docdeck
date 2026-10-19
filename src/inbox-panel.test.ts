@@ -24,6 +24,7 @@ function status(overrides: Partial<InboxStatus> = {}): InboxStatus {
     warnings: [],
     truncated: false,
     loading: false,
+    progress: null,
     ...overrides,
   };
 }
@@ -109,6 +110,22 @@ describe("InboxPanel", () => {
   it("shows a loading line before the scan resolves", () => {
     const root = render([], status({ loading: true }));
     expect(root.querySelector(".inbox-loading")?.textContent).toContain("Scanning");
+  });
+
+  it("names the path currently being scanned", () => {
+    const root = render(
+      [],
+      status({
+        loading: true,
+        progress: { path: "/topdata/shop/_ai", directories: 42, files: 7 },
+      }),
+    );
+
+    const line = root.querySelector(".inbox-loading");
+    expect(line?.textContent).toContain("/topdata/shop/_ai");
+    expect(line?.textContent).toContain("42 folders");
+    expect(line?.textContent).toContain("7 files");
+    expect(line?.getAttribute("title")).toBe("/topdata/shop/_ai");
   });
 
   it("shows a config parse error", () => {

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::folder::scan_markdown;
+    use crate::folder::scan_markdown_with_progress;
     use crate::paths::ExcludeSet;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -8,7 +8,9 @@ mod tests {
     use tempfile::tempdir;
 
     fn scan(root: &Path) -> (Vec<String>, bool) {
-        let outcome = scan_markdown(root, &ExcludeSet::default(), 1000).unwrap();
+        let outcome =
+            scan_markdown_with_progress(root, &ExcludeSet::default(), 1000, &mut |_, _, _| {})
+                .unwrap();
         let mut names: Vec<String> = outcome
             .files
             .iter()
@@ -57,7 +59,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("plan.md");
         fs::write(&file, "# plan").unwrap();
-        assert!(scan_markdown(&file, &ExcludeSet::default(), 1000).is_err());
+        assert!(scan_markdown_with_progress(
+            &file,
+            &ExcludeSet::default(),
+            1000,
+            &mut |_, _, _| {}
+        )
+        .is_err());
     }
 
     #[test]
@@ -71,7 +79,8 @@ mod tests {
             ExcludeSet::build_lenient(&["**/drafts/**".to_string()], dir.path());
         assert!(warnings.is_empty());
 
-        let outcome = scan_markdown(dir.path(), &excludes, 1000).unwrap();
+        let outcome =
+            scan_markdown_with_progress(dir.path(), &excludes, 1000, &mut |_, _, _| {}).unwrap();
         assert_eq!(outcome.files.len(), 1);
         assert!(outcome.files[0].ends_with("keep.md"));
     }
@@ -94,8 +103,43 @@ mod tests {
             fs::write(dir.path().join(format!("doc_{index}.md")), "# doc").unwrap();
         }
 
-        let outcome = scan_markdown(dir.path(), &ExcludeSet::default(), 3).unwrap();
+        let outcome =
+            scan_markdown_with_progress(dir.path(), &ExcludeSet::default(), 3, &mut |_, _, _| {})
+                .unwrap();
         assert_eq!(outcome.files.len(), 3);
         assert!(outcome.truncated);
+    }
+
+    #[test]
+    fn reports_directories_and_running_file_count() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("nested")).unwrap();
+        fs::write(dir.path().join("root.md"), "# root").unwrap();
+        fs::write(dir.path().join("nested/plan.md"), "# plan").unwrap();
+        fs::write(dir.path().join("notes.txt"), "nope").unwrap();
+
+        let mut seen_dirs: Vec<String> = Vec::new();
+        let mut max_files = 0;
+        let outcome = scan_markdown_with_progress(
+            dir.path(),
+            &ExcludeSet::default(),
+            100,
+            &mut |path, is_dir, files| {
+                if is_dir {
+                    seen_dirs.push(
+                        path.strip_prefix(dir.path())
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+                max_files = max_files.max(files);
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.files.len(), 2);
+        assert!(seen_dirs.contains(&"nested".to_string()));
+        assert_eq!(max_files, 2);
     }
 }

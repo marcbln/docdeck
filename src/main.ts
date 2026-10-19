@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
 import { InboxModel, type InboxSeed } from "./inbox-model";
-import { InboxPanel, type InboxStatus } from "./inbox-panel";
+import { InboxPanel, type InboxStatus, type ScanProgress } from "./inbox-panel";
 import {
   applyMermaidTheme,
   isTailing,
@@ -129,10 +129,13 @@ class AppState {
     warnings: [],
     truncated: false,
     loading: true,
+    progress: null,
   };
   /** The tab currently playing the brief active-write pulse, if any. */
   private activeUpdatePath: string | null = null;
   private activeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Scans whose result has not arrived yet; stale progress events are dropped. */
+  private scansInFlight = 0;
   private readonly inboxPanelEl = must<HTMLElement>("inbox-panel");
   private readonly inboxPanel: InboxPanel;
 
@@ -191,14 +194,16 @@ class AppState {
       const entries = await invoke<CliEntry[]>("startup_paths");
       const folders = entries.filter((entry) => entry.is_dir).map((entry) => entry.path);
 
-      // Config first: its excludes must be installed before a session folder
-      // is scanned, or the two sources would disagree about what is noise.
-      await this.loadWatchConfig();
-      if (folders.length > 0) await this.addWatch(folders);
-
+      // Explicit documents first: a config scan over a deep glob can take
+      // minutes, and `docdeck README.md` must not wait behind it.
       for (const entry of entries) {
         if (!entry.is_dir) await this.openDocument(entry.path);
       }
+
+      // Config next: its excludes must be installed before a session folder
+      // is scanned, or the two sources would disagree about what is noise.
+      await this.loadWatchConfig();
+      if (folders.length > 0) await this.addWatch(folders);
     } catch (error) {
       console.error("Failed to read startup paths", error);
     }
@@ -294,6 +299,13 @@ class AppState {
       // A batch of settled writes from the debounced inotify watcher.
       await listen<PathChange[]>("paths-changed", (event) => {
         for (const change of event.payload) void this.applyPathChange(change);
+      });
+
+      // Live position of the (possibly minutes-long) config or folder scan.
+      await listen<ScanProgress>("scan-progress", (event) => {
+        if (this.scansInFlight === 0) return;
+        this.inboxStatus = { ...this.inboxStatus, progress: event.payload };
+        this.renderInbox();
       });
     } catch (error) {
       console.error("Failed to attach backend listeners", error);
@@ -470,6 +482,8 @@ class AppState {
 
   /** Loads the global config and turns it into watches plus inbox rows. */
   private async loadWatchConfig(): Promise<void> {
+    this.scansInFlight += 1;
+    this.inboxStatus = { ...this.inboxStatus, loading: true, progress: null };
     this.renderInbox();
     try {
       const result = await invoke<WatchLoad>("load_watches");
@@ -482,6 +496,7 @@ class AppState {
         warnings: result.warnings,
         truncated: result.truncated,
         loading: false,
+        progress: null,
       };
     } catch (error) {
       console.error("Failed to load watch config", error);
@@ -492,13 +507,17 @@ class AppState {
         warnings: [],
         truncated: false,
         loading: false,
+        progress: null,
       };
+    } finally {
+      this.scansInFlight -= 1;
     }
     this.renderInbox();
   }
 
   /** Registers session watches for CLI folder arguments. */
   private async addWatch(paths: string[]): Promise<void> {
+    this.scansInFlight += 1;
     try {
       const result = await invoke<WatchAdded>("add_watch", { paths });
       for (const root of result.roots) this.watchRoots.add(root);
@@ -510,6 +529,9 @@ class AppState {
         ...this.inboxStatus.warnings,
         `Could not watch folder: ${String(error)}`,
       ];
+    } finally {
+      this.scansInFlight -= 1;
+      if (this.scansInFlight === 0) this.inboxStatus.progress = null;
     }
     this.renderInbox();
   }

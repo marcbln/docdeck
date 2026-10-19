@@ -109,6 +109,10 @@ exclude = [
 - The config is read once at startup; restart docdeck after editing it.
 - Expansion is capped at 256 watched roots and 10,000 files; the inbox names
   any selector that was truncated.
+- Scanning runs in the background so the window stays responsive. While a
+  selector is being expanded or a root is being read, the Inbox shows the path
+  currently being scanned with running folder and file counts. Explicit
+  `docdeck <file>` arguments open before the config scan starts.
 
 The **Inbox** panel lists every matched file newest-first. Bold filenames with
 an amber dot changed since docdeck started; opening the row or activating its

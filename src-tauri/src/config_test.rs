@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{expand_with_limits, load, Limits, WatchConfig};
+    use crate::config::{expand_with_limits_and_progress, load, Limits, WatchConfig};
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ mod tests {
     }
 
     fn expand(config: &WatchConfig, home: &Path) -> crate::config::WatchPlan {
-        expand_with_limits(config, home, Limits::default())
+        expand_with_limits_and_progress(config, home, Limits::default(), &mut |_, _, _| {})
     }
 
     // -- loading -------------------------------------------------------------
@@ -238,13 +238,14 @@ mod tests {
             fs::create_dir_all(home.path().join("projects").join(name)).unwrap();
         }
 
-        let plan = expand_with_limits(
+        let plan = expand_with_limits_and_progress(
             &config(&["~/projects/*"], &[]),
             home.path(),
             Limits {
                 max_roots: 2,
                 max_files: 10,
             },
+            &mut |_, _, _| {},
         );
 
         assert_eq!(plan.roots.len(), 2);
@@ -256,19 +257,42 @@ mod tests {
     }
 
     #[test]
+    fn reports_glob_walk_progress() {
+        let home = tempdir().unwrap();
+        fs::create_dir_all(home.path().join("projects/alpha/_ai")).unwrap();
+
+        let mut visited: Vec<PathBuf> = Vec::new();
+        let plan = expand_with_limits_and_progress(
+            &config(&["~/projects/*/_ai"], &[]),
+            home.path(),
+            Limits::default(),
+            &mut |path, is_dir, _| {
+                if is_dir {
+                    visited.push(path.to_path_buf());
+                }
+            },
+        );
+
+        assert_eq!(plan.roots.len(), 1);
+        assert!(visited.iter().any(|path| path.ends_with("projects")));
+        assert!(visited.iter().any(|path| path.ends_with("alpha")));
+    }
+
+    #[test]
     fn file_cap_truncates_with_a_warning() {
         let home = tempdir().unwrap();
         fs::create_dir_all(home.path().join("notes")).unwrap();
         fs::write(home.path().join("notes/a.md"), "# a").unwrap();
         fs::write(home.path().join("notes/b.md"), "# b").unwrap();
 
-        let plan = expand_with_limits(
+        let plan = expand_with_limits_and_progress(
             &config(&["~/notes/**/*.md"], &[]),
             home.path(),
             Limits {
                 max_roots: 10,
                 max_files: 1,
             },
+            &mut |_, _, _| {},
         );
 
         assert_eq!(plan.files.len(), 1);

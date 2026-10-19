@@ -11,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use globset::GlobBuilder;
 use walkdir::{DirEntry, WalkDir};
 
+use crate::folder::ProgressSink;
 use crate::paths::{expand_tilde, is_ignored_name, is_noise_name, ExcludeSet};
 
 /// Hard ceiling on recursively watched roots per session.
@@ -109,7 +110,16 @@ pub fn load(path: &Path) -> Result<LoadedConfig, String> {
 /// `home` is a parameter instead of an env read so tests control tilde and
 /// relative resolution. Warnings never abort expansion: one bad selector must
 /// not take down the rest of the config.
-pub fn expand_with_limits(config: &WatchConfig, home: &Path, limits: Limits) -> WatchPlan {
+///
+/// Glob selectors walk their literal base recursively; on a selector such as
+/// `/projects/**/_ai` that walk is the expensive part of startup, so every
+/// visited entry is reported to `progress`.
+pub fn expand_with_limits_and_progress(
+    config: &WatchConfig,
+    home: &Path,
+    limits: Limits,
+    progress: ProgressSink<'_>,
+) -> WatchPlan {
     let mut plan = WatchPlan::default();
     let (excludes, mut warnings) = ExcludeSet::build_lenient(&config.exclude, home);
     plan.excludes = excludes;
@@ -121,13 +131,19 @@ pub fn expand_with_limits(config: &WatchConfig, home: &Path, limits: Limits) -> 
         if !seen.insert(expanded.clone()) {
             continue; // duplicate selector, not worth a warning
         }
-        expand_selector(selector, &expanded, &mut plan, limits);
+        expand_selector(selector, &expanded, &mut plan, limits, &mut *progress);
     }
 
     plan
 }
 
-fn expand_selector(selector: &str, pattern: &Path, plan: &mut WatchPlan, limits: Limits) {
+fn expand_selector(
+    selector: &str,
+    pattern: &Path,
+    plan: &mut WatchPlan,
+    limits: Limits,
+    progress: ProgressSink<'_>,
+) {
     if is_literal(pattern) {
         match fs::symlink_metadata(pattern) {
             Err(_) => plan.warnings.push(format!(
@@ -205,33 +221,33 @@ fn expand_selector(selector: &str, pattern: &Path, plan: &mut WatchPlan, limits:
             }
         };
 
-        if entry.depth() == 0 || !matcher.is_match(entry.path()) {
-            continue;
-        }
-        // Symlinks are skipped by policy; canonicalizing one would silently
-        // turn it into its target.
-        if entry.file_type().is_symlink() {
-            continue;
-        }
+        let is_dir = entry.file_type().is_dir();
+        let matches =
+            entry.depth() != 0 && matcher.is_match(entry.path()) && !entry.file_type().is_symlink();
 
-        let path = match entry.path().canonicalize() {
-            Ok(path) => path,
-            Err(error) => {
-                plan.warnings.push(format!(
-                    "selector \"{selector}\": {}: {error}",
-                    entry.path().display()
-                ));
-                continue;
+        if matches {
+            // Symlinks are skipped by policy; canonicalizing one would silently
+            // turn it into its target.
+            let path = match entry.path().canonicalize() {
+                Ok(path) => path,
+                Err(error) => {
+                    plan.warnings.push(format!(
+                        "selector \"{selector}\": {}: {error}",
+                        entry.path().display()
+                    ));
+                    progress(entry.path(), is_dir, plan.roots.len() + plan.files.len());
+                    continue;
+                }
+            };
+
+            if !excludes.is_excluded(&path)
+                && add_match(plan, &path, selector, limits, &mut cap_warned)
+            {
+                matched_any = true;
             }
-        };
-
-        if excludes.is_excluded(&path) {
-            continue;
         }
 
-        if add_match(plan, &path, selector, limits, &mut cap_warned) {
-            matched_any = true;
-        }
+        progress(entry.path(), is_dir, plan.roots.len() + plan.files.len());
     }
 
     if !matched_any {

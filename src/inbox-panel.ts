@@ -2,6 +2,13 @@ import type { InboxEntry } from "./inbox-model";
 import { compactPath, parentPath, projectName } from "./project";
 import { formatExactTime, formatRelativeTime } from "./relative-time";
 
+/** Where a running scan currently is, as streamed by the backend. */
+export interface ScanProgress {
+  path: string;
+  directories: number;
+  files: number;
+}
+
 /** Everything the panel needs to explain the current watch state. */
 export interface InboxStatus {
   configPath: string;
@@ -10,6 +17,7 @@ export interface InboxStatus {
   warnings: string[];
   truncated: boolean;
   loading: boolean;
+  progress: ScanProgress | null;
 }
 
 export interface InboxPanelOptions {
@@ -35,8 +43,11 @@ export class InboxPanel {
     fragment.append(this.renderHeader(entries));
 
     if (status.loading) {
-      fragment.append(this.message("Scanning watched paths…", "inbox-loading"));
+      fragment.append(this.scanMessage(status.progress));
     } else {
+      if (status.progress) {
+        fragment.append(this.scanMessage(status.progress));
+      }
       if (status.error) {
         fragment.append(this.message(`Config error: ${status.error}`, "inbox-error"));
       } else if (!status.configFound) {
@@ -154,6 +165,22 @@ export class InboxPanel {
 
     item.append(top, bottom);
     return item;
+  }
+
+  private scanMessage(progress: ScanProgress | null): HTMLElement {
+    if (!progress) return this.message("Scanning watched paths…", "inbox-loading");
+
+    const shown = compactPath(progress.path);
+    const folders = `${progress.directories} ${
+      progress.directories === 1 ? "folder" : "folders"
+    }`;
+    const files = `${progress.files} ${progress.files === 1 ? "file" : "files"}`;
+    const line = this.message(
+      `Scanning ${shown} (${folders} · ${files})`,
+      "inbox-loading",
+    );
+    line.title = progress.path;
+    return line;
   }
 
   private setupHint(configPath: string): HTMLElement {

@@ -3,12 +3,72 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::{self, Limits, MAX_FILES};
 use crate::folder;
 use crate::paths::modified_millis;
 use crate::watcher::WatcherState;
+
+/// Throttle for `scan-progress`: fast enough to feel live, slow enough that a
+/// huge walk cannot flood the webview with events.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
+
+/// Live scan state forwarded to the inbox while a walk is running.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgress {
+    pub path: String,
+    pub directories: u64,
+    pub files: usize,
+}
+
+/// Accumulates walk counters and emits them at most once per throttle window.
+struct ScanReporter {
+    app: AppHandle,
+    last_emit: Option<Instant>,
+    directories: u64,
+    files: usize,
+}
+
+impl ScanReporter {
+    fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            last_emit: None,
+            directories: 0,
+            files: 0,
+        }
+    }
+
+    /// Records one visited entry; emits when the throttle window has elapsed.
+    fn sample(&mut self, path: &Path, is_dir: bool, files: usize) {
+        if is_dir {
+            self.directories += 1;
+        }
+        self.files = files;
+
+        let due = self
+            .last_emit
+            .is_none_or(|last| last.elapsed() >= PROGRESS_INTERVAL);
+        if due {
+            self.emit(path);
+        }
+    }
+
+    fn emit(&mut self, path: &Path) {
+        self.last_emit = Some(Instant::now());
+        let _ = self.app.emit(
+            "scan-progress",
+            ScanProgress {
+                path: path.to_string_lossy().into_owned(),
+                directories: self.directories,
+                files: self.files,
+            },
+        );
+    }
+}
 
 #[derive(serde::Serialize)]
 pub struct FilePayload {
@@ -110,8 +170,29 @@ pub fn close_file(path_str: String, watcher: State<WatcherState>) -> Result<(), 
 ///
 /// The inventory is metadata-only: every matched document's mtime is read, but
 /// no document content. Content is loaded lazily when a row is clicked.
+///
+/// The walk runs on a blocking worker: a deep selector over a large tree can
+/// take minutes, and doing that on the main thread freezes the window (close
+/// button included). Progress is streamed as `scan-progress` events.
 #[tauri::command]
-pub fn load_watches(watcher: State<WatcherState>) -> WatchLoad {
+pub async fn load_watches(app: AppHandle) -> WatchLoad {
+    let fallback_path = config::config_path().to_string_lossy().into_owned();
+    match tauri::async_runtime::spawn_blocking(move || load_watches_blocking(&app)).await {
+        Ok(result) => result,
+        Err(error) => WatchLoad {
+            config_path: fallback_path,
+            config_found: true,
+            roots: Vec::new(),
+            entries: Vec::new(),
+            warnings: Vec::new(),
+            error: Some(format!("watch scan failed: {error}")),
+            truncated: false,
+        },
+    }
+}
+
+fn load_watches_blocking(app: &AppHandle) -> WatchLoad {
+    let watcher = app.state::<WatcherState>();
     let path = config::config_path();
     let config_path = path.to_string_lossy().into_owned();
 
@@ -131,7 +212,14 @@ pub fn load_watches(watcher: State<WatcherState>) -> WatchLoad {
     };
 
     let home = config::home_dir();
-    let plan = config::expand_with_limits(&loaded.config, &home, Limits::default());
+    let mut reporter = ScanReporter::new(app.clone());
+    reporter.emit(&home);
+    let plan = config::expand_with_limits_and_progress(
+        &loaded.config,
+        &home,
+        Limits::default(),
+        &mut |path, is_dir, files| reporter.sample(path, is_dir, files),
+    );
 
     let mut warnings = plan.warnings;
     let mut truncated = plan.truncated;
@@ -162,7 +250,13 @@ pub fn load_watches(watcher: State<WatcherState>) -> WatchLoad {
     // Scan roots for Markdown, respecting the remaining global file budget.
     for root in &plan.roots {
         let remaining = MAX_FILES.saturating_sub(entries.len());
-        match folder::scan_markdown(root, &plan.excludes, remaining) {
+        reporter.emit(root);
+        match folder::scan_markdown_with_progress(
+            root,
+            &plan.excludes,
+            remaining,
+            &mut |path, is_dir, files| reporter.sample(path, is_dir, files),
+        ) {
             Ok(outcome) => {
                 if outcome.truncated {
                     truncated = true;
@@ -221,8 +315,22 @@ pub fn load_watches(watcher: State<WatcherState>) -> WatchLoad {
 /// Uses the excludes already installed by `load_watches`, so a session folder
 /// observes the same filter as the config. CLI file arguments do not come
 /// through here: they open a tab directly and are not part of the registry.
+/// Like `load_watches`, the walk runs off the main thread and streams progress.
 #[tauri::command]
-pub fn add_watch(paths: Vec<String>, watcher: State<WatcherState>) -> WatchAdded {
+pub async fn add_watch(app: AppHandle, paths: Vec<String>) -> WatchAdded {
+    match tauri::async_runtime::spawn_blocking(move || add_watch_blocking(&app, paths)).await {
+        Ok(result) => result,
+        Err(error) => WatchAdded {
+            roots: Vec::new(),
+            entries: Vec::new(),
+            warnings: vec![format!("folder scan failed: {error}")],
+        },
+    }
+}
+
+fn add_watch_blocking(app: &AppHandle, paths: Vec<String>) -> WatchAdded {
+    let watcher = app.state::<WatcherState>();
+    let mut reporter = ScanReporter::new(app.clone());
     let excludes = watcher.excludes();
     let mut roots: Vec<String> = Vec::new();
     let mut entries: Vec<InboxEntry> = Vec::new();
@@ -243,7 +351,13 @@ pub fn add_watch(paths: Vec<String>, watcher: State<WatcherState>) -> WatchAdded
         }
 
         let remaining = MAX_FILES.saturating_sub(entries.len());
-        match folder::scan_markdown(&path, &excludes, remaining) {
+        reporter.emit(&path);
+        match folder::scan_markdown_with_progress(
+            &path,
+            &excludes,
+            remaining,
+            &mut |p, is_dir, files| reporter.sample(p, is_dir, files),
+        ) {
             Ok(outcome) => {
                 if outcome.truncated {
                     warnings.push(format!(
