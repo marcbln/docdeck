@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- Opening or switching to a document now starts at the top. Previously the
+  renderer treated the empty (or previous) pane as "tailing" and scrolled the
+  new document to its end; scroll preservation and tail-pinning now apply only
+  to live reloads of the document already on screen.
 - The window stays responsive while watched folders are scanned, and the inbox
   names the path currently being indexed with running folder/file counts.
   `load_watches` and `add_watch` now walk the filesystem on a blocking worker

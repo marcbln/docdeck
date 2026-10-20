@@ -102,4 +102,44 @@ describe("renderMarkdown", () => {
     expect(target.querySelectorAll(".code-block")).toHaveLength(1);
     expect(target.querySelectorAll("button.code-copy")).toHaveLength(1);
   });
+
+  /** A pane tall enough to scroll, with a fixed viewport for tail detection. */
+  function scrollPane(): { scroller: HTMLElement; article: HTMLElement } {
+    const scroller = document.createElement("main");
+    Object.defineProperty(scroller, "scrollHeight", { value: 1_000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+    const article = document.createElement("article");
+    scroller.appendChild(article);
+    document.body.appendChild(scroller);
+    return { scroller, article };
+  }
+
+  it("opens a switched document at the top even when the pane was tailing", async () => {
+    const { scroller, article } = scrollPane();
+    scroller.scrollTop = 900;
+
+    await renderMarkdown("# Next document\n\nBody.", article, [], "top");
+
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("keeps a tailing reader pinned to the end on a same-document reload", async () => {
+    const { scroller, article } = scrollPane();
+    await renderMarkdown("first line", article, [], "top");
+    scroller.scrollTop = 900;
+
+    await renderMarkdown("first line\nappended line", article, [], "preserve");
+
+    expect(scroller.scrollTop).toBe(1_000);
+  });
+
+  it("keeps a mid-document reader in place on a same-document reload", async () => {
+    const { scroller, article } = scrollPane();
+    await renderMarkdown("first line", article, [], "top");
+    scroller.scrollTop = 200;
+
+    await renderMarkdown("first line\nappended line", article, [], "preserve");
+
+    expect(scroller.scrollTop).toBe(200);
+  });
 });

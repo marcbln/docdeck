@@ -94,6 +94,8 @@ function must<T extends HTMLElement>(id: string): T {
 class AppState {
   private readonly tabs = new Map<string, Tab>();
   private activePath: string | null = null;
+  /** Path whose markup is painted; null while the empty state is showing. */
+  private renderedPath: string | null = null;
   private autoSort = false;
   private sidebarLayout = false;
 
@@ -609,6 +611,7 @@ class AppState {
     const tab = this.activePath ? this.tabs.get(this.activePath) : undefined;
 
     if (!tab) {
+      this.renderedPath = null;
       this.emptyState.classList.remove("hidden");
       this.viewer.classList.add("hidden");
       this.viewer.replaceChildren();
@@ -620,18 +623,23 @@ class AppState {
     this.emptyState.classList.add("hidden");
     this.viewer.classList.remove("hidden");
 
+    // A different document starts at the top; only a re-render of the document
+    // already on screen may inherit its scroll offset.
+    const switching = this.activePath !== this.renderedPath;
+    this.renderedPath = this.activePath;
+
     const { raw, body } = splitFrontmatter(tab.content);
 
     // Captured before the paint so the table's height — added after the
     // renderer has already restored the scroll position — is accounted for.
-    const wasTailing = isTailing(this.contentContainer);
+    const wasTailing = !switching && isTailing(this.contentContainer);
 
     try {
       this.metadata.clear();
       this.viewer.replaceChildren();
 
       const headings = extractHeadings(marked, body);
-      await renderMarkdown(body, this.viewer, headings);
+      await renderMarkdown(body, this.viewer, headings, switching ? "top" : "preserve");
 
       if (raw !== null && this.preferences.frontmatterVisible) {
         this.metadata.mount(parseFrontmatterRows(raw));

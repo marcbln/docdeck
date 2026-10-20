@@ -70,6 +70,16 @@ export const marked = new Marked(
 const TAIL_THRESHOLD_PX = 32;
 
 /**
+ * How a render treats the scroll pane.
+ *
+ * `preserve` is for live reloads of the document already on screen: a reader at
+ * the end stays pinned to the newest content, everyone else keeps their reading
+ * position. `top` is for opening or switching documents, where inheriting the
+ * previous pane's offset would drop the reader at the end of the new file.
+ */
+export type RenderScroll = "preserve" | "top";
+
+/**
  * Whether a scroll pane is parked at (or within a hair of) its end.
  *
  * Exported so the caller can re-pin the pane after it grows the content
@@ -109,16 +119,21 @@ function stampHeadingIds(
  * Scroll behaviour across a live reload: a reader who is tailing the document
  * stays pinned to the newest content, everyone else keeps their reading
  * position. Without this, an agent appending lines would yank a mid-document
- * reader downwards on every write.
+ * reader downwards on every write. Switching documents passes `"top"` so the
+ * new file never opens at the previous pane's offset.
  */
 export async function renderMarkdown(
   content: string,
   targetEl: HTMLElement,
   headings: Heading[] = [],
+  scroll: RenderScroll = "preserve",
 ): Promise<void> {
   const scrollParent = targetEl.parentElement;
   const previousScrollTop = scrollParent?.scrollTop ?? 0;
-  const wasTailing = !!scrollParent && isTailing(scrollParent);
+  const preserve = scroll === "preserve";
+  const wasTailing = preserve && !!scrollParent && isTailing(scrollParent);
+
+  if (scrollParent && !preserve) scrollParent.scrollTop = 0;
 
   // `marked.parse` is typed `string | Promise<string>`. It resolves
   // synchronously here because no async extension is registered, but the type
@@ -165,9 +180,11 @@ export async function renderMarkdown(
   mountCopyButtons(targetEl);
 
   if (scrollParent) {
-    scrollParent.scrollTop = wasTailing
-      ? scrollParent.scrollHeight
-      : previousScrollTop;
+    scrollParent.scrollTop = !preserve
+      ? 0
+      : wasTailing
+        ? scrollParent.scrollHeight
+        : previousScrollTop;
   }
 }
 
