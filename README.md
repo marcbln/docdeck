@@ -121,10 +121,13 @@ exclude = [
   globs apply on top.
 - The config is read once at startup; restart docdeck after editing it.
 - Expansion is capped at 256 watched roots, 10,000 files and 100,000 visited
-  entries per walk; the inbox names any selector that was truncated. A broad
-  `**` selector over a content store (a CMS media tree, for example) stops at
-  the entry cap instead of spending minutes walking directories that cannot
-  contain documents.
+  entries per walk; the inbox names any selector that was truncated. `**`
+  walks are breadth-first, so shallow matches are found even when the entry cap
+  is hit. Bounded selectors walk depth-first but follow each pattern segment,
+  skipping unrelated siblings (a shop's `vol/mariadb`, for example); use one to
+  guarantee a deeply nested root. A broad `**` selector over a content store (a
+  CMS media tree, for example) stops at the entry cap instead of spending
+  minutes walking directories that cannot contain documents.
 - Scanning runs in the background so the window stays responsive. While a
   selector is being expanded or a root is being read, the Inbox shows the path
   currently being scanned with running folder and file counts. Explicit

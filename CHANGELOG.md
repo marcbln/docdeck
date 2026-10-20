@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- `**` expansion now walks breadth-first instead of depth-first, so one huge
+  project can no longer consume the 100,000-entry budget before sibling
+  directories are visited. Bounded selectors (`/shops/*/plugins/*/_ai`) now
+  follow each pattern segment and skip unrelated siblings such as a shop's
+  `vol/mariadb`, so deep plugin workspaces are found without walking database
+  or source trees.
 - Broad `**` selectors no longer walk content stores without bound: `vendor`,
   `cache`, `media`, `thumbnail`, `thumbnails`, `bundles`, `sitemap`, `uploads`,
   `storage`, `var`, `logs`, `__pycache__`, `htmlcov` and `*.egg-info` are now

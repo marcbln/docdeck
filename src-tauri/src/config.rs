@@ -4,7 +4,7 @@
 //! expansion is unit-testable with temp directories and an explicit home
 //! directory.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -198,70 +198,178 @@ fn expand_selector(
     // out of the plan before any warning can be pushed.
     let excludes = plan.excludes.clone();
 
-    let mut walker = WalkDir::new(&base).follow_links(false);
-    if !contains_deep_glob(pattern) {
-        let remaining = pattern
-            .components()
-            .count()
-            .saturating_sub(base.components().count());
-        walker = walker.max_depth(remaining);
-    }
+    let max_depth = if contains_deep_glob(pattern) {
+        None
+    } else {
+        Some(
+            pattern
+                .components()
+                .count()
+                .saturating_sub(base.components().count()),
+        )
+    };
 
     let mut matched_any = false;
     let mut cap_warned = false;
     let mut entries_truncated = false;
+    let truncation_warning = || {
+        format!(
+            "selector \"{selector}\" truncated: scan entry limit ({}) reached; narrow the selector or add an exclude pattern",
+            limits.max_entries
+        )
+    };
 
-    for (visited, entry) in walker
-        .into_iter()
-        .filter_entry(|entry| should_descend(entry, &excludes))
-        .enumerate()
-    {
-        if visited >= limits.max_entries {
-            entries_truncated = true;
-            plan.truncated = true;
-            plan.warnings.push(format!(
-                "selector \"{selector}\" truncated: scan entry limit ({}) reached; narrow the selector or add an exclude pattern",
-                limits.max_entries
-            ));
-            break;
+    if limits.max_entries == 0 {
+        plan.truncated = true;
+        plan.warnings.push(truncation_warning());
+        return;
+    }
+
+    if contains_deep_glob(pattern) {
+        // Walk breadth-first, not depth-first. Most `_ai` roots sit near the top
+        // of a tree, while one deep project (a shop's `t2-app` or a huge clone)
+        // can swallow the entry budget before a depth-first walk ever reaches
+        // its siblings. Breadth-first visits every directory at a given depth
+        // before descending, so shallow roots are found even when the cap is
+        // hit.
+        let mut pending: VecDeque<(PathBuf, usize)> = VecDeque::new();
+        let base_is_symlink =
+            fs::symlink_metadata(&base).is_ok_and(|metadata| metadata.file_type().is_symlink());
+
+        progress(&base, true, plan.roots.len() + plan.files.len());
+        let mut visited = 1usize;
+
+        if !base_is_symlink {
+            pending.push_back((base, 0));
         }
 
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                plan.warnings
-                    .push(format!("selector \"{selector}\": {error}"));
-                continue;
-            }
-        };
-
-        let is_dir = entry.file_type().is_dir();
-        let matches =
-            entry.depth() != 0 && matcher.is_match(entry.path()) && !entry.file_type().is_symlink();
-
-        if matches {
-            // Symlinks are skipped by policy; canonicalizing one would silently
-            // turn it into its target.
-            let path = match entry.path().canonicalize() {
-                Ok(path) => path,
+        'walk: while let Some((directory, depth)) = pending.pop_front() {
+            let entries = match fs::read_dir(&directory) {
+                Ok(entries) => entries,
                 Err(error) => {
                     plan.warnings.push(format!(
                         "selector \"{selector}\": {}: {error}",
-                        entry.path().display()
+                        directory.display()
                     ));
-                    progress(entry.path(), is_dir, plan.roots.len() + plan.files.len());
                     continue;
                 }
             };
 
-            if !excludes.is_excluded(&path)
-                && add_match(plan, &path, selector, limits, &mut cap_warned)
-            {
-                matched_any = true;
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        plan.warnings
+                            .push(format!("selector \"{selector}\": {error}"));
+                        continue;
+                    }
+                };
+
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if is_ignored_name(&name) || is_noise_name(&name) {
+                    continue;
+                }
+
+                let file_type = match entry.file_type() {
+                    Ok(file_type) => file_type,
+                    Err(error) => {
+                        plan.warnings.push(format!(
+                            "selector \"{selector}\": {}: {error}",
+                            entry.path().display()
+                        ));
+                        continue;
+                    }
+                };
+                let path = entry.path();
+                let is_dir = file_type.is_dir();
+
+                if is_dir && excludes.is_excluded(&path) {
+                    continue;
+                }
+
+                if visited >= limits.max_entries {
+                    entries_truncated = true;
+                    plan.truncated = true;
+                    plan.warnings.push(truncation_warning());
+                    break 'walk;
+                }
+                visited += 1;
+
+                let entry_depth = depth + 1;
+                consider_entry(
+                    plan,
+                    &path,
+                    is_dir,
+                    file_type.is_symlink(),
+                    entry_depth,
+                    &matcher,
+                    &excludes,
+                    selector,
+                    limits,
+                    &mut cap_warned,
+                    &mut matched_any,
+                    progress,
+                );
+
+                if is_dir && entry_depth < max_depth.unwrap_or(usize::MAX) {
+                    pending.push_back((path, entry_depth));
+                }
             }
         }
+    } else {
+        // Bounded selectors stay depth-first: for
+        // `/shops/*/plugins/*/_ai` a breadth-first walk would enumerate every
+        // file at each level before reaching the `_ai` leaf, while depth-first
+        // walks straight down each branch. They also follow the pattern
+        // segment by segment, so a sibling such as a shop's `vol/mariadb`
+        // database is never entered.
+        let Some(segments) = pattern_segments(pattern, &base) else {
+            plan.warnings
+                .push(format!("selector \"{selector}\" ignored: invalid glob"));
+            return;
+        };
+        let mut walker = WalkDir::new(&base).follow_links(false);
+        if let Some(limit) = max_depth {
+            walker = walker.max_depth(limit);
+        }
 
-        progress(entry.path(), is_dir, plan.roots.len() + plan.files.len());
+        for (visited, entry) in walker
+            .into_iter()
+            .filter_entry(|entry| should_descend_bounded(entry, &segments, &excludes))
+            .enumerate()
+        {
+            if visited >= limits.max_entries {
+                entries_truncated = true;
+                plan.truncated = true;
+                plan.warnings.push(truncation_warning());
+                break;
+            }
+
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    plan.warnings
+                        .push(format!("selector \"{selector}\": {error}"));
+                    continue;
+                }
+            };
+
+            consider_entry(
+                plan,
+                entry.path(),
+                entry.file_type().is_dir(),
+                entry.file_type().is_symlink(),
+                entry.depth(),
+                &matcher,
+                &excludes,
+                selector,
+                limits,
+                &mut cap_warned,
+                &mut matched_any,
+                progress,
+            );
+        }
     }
 
     if !matched_any && !entries_truncated {
@@ -269,6 +377,105 @@ fn expand_selector(
             "selector \"{selector}\" matched no files or directories"
         ));
     }
+}
+
+/// Records one visited entry: matches are canonicalized and added, then the
+/// progress sink is told about the path.
+#[allow(clippy::too_many_arguments)]
+fn consider_entry(
+    plan: &mut WatchPlan,
+    path: &Path,
+    is_dir: bool,
+    is_symlink: bool,
+    depth: usize,
+    matcher: &globset::GlobMatcher,
+    excludes: &ExcludeSet,
+    selector: &str,
+    limits: Limits,
+    cap_warned: &mut bool,
+    matched_any: &mut bool,
+    progress: &mut dyn FnMut(&Path, bool, usize),
+) {
+    if depth != 0 && matcher.is_match(path) && !is_symlink {
+        // Symlinks are skipped by policy; canonicalizing one would silently
+        // turn it into its target.
+        match path.canonicalize() {
+            Ok(path) => {
+                if !excludes.is_excluded(&path)
+                    && add_match(plan, &path, selector, limits, cap_warned)
+                {
+                    *matched_any = true;
+                }
+            }
+            Err(error) => plan.warnings.push(format!(
+                "selector \"{selector}\": {}: {error}",
+                path.display()
+            )),
+        }
+    }
+
+    progress(path, is_dir, plan.roots.len() + plan.files.len());
+}
+
+/// One path segment of a bounded selector, after the literal base.
+enum Segment {
+    Literal(std::ffi::OsString),
+    Glob(globset::GlobMatcher),
+}
+
+impl Segment {
+    fn matches(&self, name: &std::ffi::OsStr) -> bool {
+        match self {
+            Self::Literal(expected) => expected.as_os_str() == name,
+            Self::Glob(matcher) => matcher.is_match(Path::new(name)),
+        }
+    }
+}
+
+/// The selector's components after the literal base, with glob components
+/// compiled individually. Returns `None` only if a component glob is invalid,
+/// which the full-pattern matcher already ruled out.
+fn pattern_segments(pattern: &Path, base: &Path) -> Option<Vec<Segment>> {
+    pattern
+        .components()
+        .skip(base.components().count())
+        .map(|component| match component {
+            Component::Normal(name) => {
+                if has_glob(name) {
+                    let text = name.to_string_lossy();
+                    GlobBuilder::new(&text)
+                        .literal_separator(true)
+                        .build()
+                        .ok()
+                        .map(|glob| Segment::Glob(glob.compile_matcher()))
+                } else {
+                    Some(Segment::Literal(name.to_os_string()))
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Pattern-guided pruning for bounded, depth-first walks: only entries whose
+/// name matches the segment at their depth are descended into (and therefore
+/// only those are yielded and matched). Hidden, backup, noise and excluded
+/// entries are pruned first.
+fn should_descend_bounded(entry: &DirEntry, segments: &[Segment], excludes: &ExcludeSet) -> bool {
+    if entry.depth() == 0 {
+        return true;
+    }
+    let name = entry.file_name();
+    let text = name.to_string_lossy();
+    if is_ignored_name(&text) || is_noise_name(&text) {
+        return false;
+    }
+    if entry.file_type().is_dir() && excludes.is_excluded(entry.path()) {
+        return false;
+    }
+    segments
+        .get(entry.depth() - 1)
+        .is_some_and(|segment| segment.matches(name))
 }
 
 /// Adds one match, deduplicating and enforcing the caps.
@@ -366,20 +573,4 @@ fn literal_base(pattern: &Path) -> PathBuf {
     } else {
         base
     }
-}
-
-/// Subtree pruning shared by the walk: hidden entries, backups, noise
-/// directories and excluded directories are never descended into.
-fn should_descend(entry: &DirEntry, excludes: &ExcludeSet) -> bool {
-    if entry.depth() == 0 {
-        return true;
-    }
-    let name = entry.file_name().to_string_lossy();
-    if is_ignored_name(&name) || is_noise_name(&name) {
-        return false;
-    }
-    if entry.file_type().is_dir() && excludes.is_excluded(entry.path()) {
-        return false;
-    }
-    true
 }

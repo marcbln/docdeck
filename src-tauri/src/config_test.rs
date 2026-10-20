@@ -280,6 +280,52 @@ mod tests {
     }
 
     #[test]
+    fn glob_expansion_visits_directories_breadth_first() {
+        let home = tempdir().unwrap();
+        fs::create_dir_all(home.path().join("projects/a/_ai")).unwrap();
+        fs::create_dir_all(home.path().join("projects/b/child/_ai")).unwrap();
+        let base = home.path().join("projects");
+
+        let mut depths: Vec<usize> = Vec::new();
+        let plan = expand_with_limits_and_progress(
+            &config(&["~/projects/**/_ai"], &[]),
+            home.path(),
+            Limits::default(),
+            &mut |path, is_dir, _| {
+                if is_dir {
+                    let relative = path.strip_prefix(&base).unwrap();
+                    depths.push(relative.components().count());
+                }
+            },
+        );
+
+        assert_eq!(plan.roots.len(), 2);
+        assert!(
+            depths.windows(2).all(|pair| pair[0] <= pair[1]),
+            "depths were not breadth-first: {depths:?}"
+        );
+    }
+
+    #[test]
+    fn bounded_selector_skips_siblings_that_cannot_match() {
+        let home = tempdir().unwrap();
+        fs::create_dir_all(home.path().join("shops/a/vol/mariadb/data")).unwrap();
+        fs::create_dir_all(home.path().join("shops/a/vol/www/custom/plugins/demo/_ai")).unwrap();
+
+        let mut visited: Vec<PathBuf> = Vec::new();
+        let plan = expand_with_limits_and_progress(
+            &config(&["~/shops/*/vol/www/custom/plugins/*/_ai"], &[]),
+            home.path(),
+            Limits::default(),
+            &mut |path, _, _| visited.push(path.to_path_buf()),
+        );
+
+        assert_eq!(plan.roots.len(), 1);
+        assert!(visited.iter().any(|path| path.ends_with("_ai")));
+        assert!(!visited.iter().any(|path| path.ends_with("mariadb")));
+    }
+
+    #[test]
     fn deep_glob_stops_at_the_entry_limit() {
         let home = tempdir().unwrap();
         for index in 0..5 {
