@@ -11,7 +11,7 @@
 #   ./scripts/install.sh              # install to ~/.local/bin
 #   ./scripts/install.sh --prefix DIR # install elsewhere (e.g. /usr/local/bin)
 #   ./scripts/install.sh --symlink    # symlink instead of copying (live rebuilds)
-#   ./scripts/install.sh --no-build   # reinstall an existing release binary
+#   ./scripts/install.sh --no-build   # reinstall a binary from `npm run tauri build`
 #
 # Environment:
 #   PREFIX   install prefix (default: ~/.local/bin)

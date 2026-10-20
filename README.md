@@ -29,6 +29,10 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Auto-sort by last update** — bump the documents an agent just touched to the top.
 - **Single-instance CLI** — running `docdeck <file>` or `docdeck <folder>` from any
   terminal reaches the *running* window instead of starting a second process.
+- **Survives the terminal** — release builds launched from a shell detach into
+  their own session (`fork` + `setsid`, like Zed's CLI), so closing that terminal
+  or exiting the shell leaves the window open. `DOCDECK_FOREGROUND=1` keeps
+  docdeck attached for debugging; debug builds never detach.
 - **GitHub-flavoured Markdown** — tables, task lists (`- [x]`), syntax-highlighted
   code blocks and Mermaid diagrams, with scroll position preserved across reloads.
 - **Copy code** — hover any code block for a button that puts its plain source on
@@ -54,6 +58,12 @@ On Arch these come from `webkit2gtk-4.1`, `base-devel`.
 npm install
 npm run tauri build
 ```
+
+Do not install a binary produced by a plain `cargo build --release`: without
+Tauri's `custom-protocol` feature it loads `http://localhost:1420` instead of the
+embedded frontend and shows "Could not connect to localhost" when no Vite dev
+server is running. `npm run tauri build` (and `scripts/install.sh`) enables that
+feature for you.
 
 The binary lands at `src-tauri/target/release/docdeck`. Put it on your `PATH`:
 
@@ -104,11 +114,17 @@ exclude = [
   matches any depth. Relative paths resolve against your home directory.
 - A matched directory contributes its recursive `*.md` tree; a matched file is
   watched explicitly.
-- Hidden entries, symlinks and `node_modules`, `target`, `dist`, `build`,
-  `.venv`, `venv` are always skipped. `exclude` globs apply on top.
+- Hidden entries (including `.git`), symlinks and `node_modules`, `target`,
+  `dist`, `build`, `.venv`, `venv`, `vendor`, `cache`, `media`, `thumbnail`,
+  `thumbnails`, `bundles`, `sitemap`, `uploads`, `storage`, `var`, `logs`,
+  `__pycache__`, `htmlcov` and `*.egg-info` are always skipped. `exclude`
+  globs apply on top.
 - The config is read once at startup; restart docdeck after editing it.
-- Expansion is capped at 256 watched roots and 10,000 files; the inbox names
-  any selector that was truncated.
+- Expansion is capped at 256 watched roots, 10,000 files and 100,000 visited
+  entries per walk; the inbox names any selector that was truncated. A broad
+  `**` selector over a content store (a CMS media tree, for example) stops at
+  the entry cap instead of spending minutes walking directories that cannot
+  contain documents.
 - Scanning runs in the background so the window stays responsive. While a
   selector is being expanded or a root is being read, the Inbox shows the path
   currently being scanned with running folder and file counts. Explicit

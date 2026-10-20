@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::{self, Limits, MAX_FILES};
-use crate::folder;
+use crate::folder::{self, MAX_SCAN_ENTRIES};
 use crate::paths::modified_millis;
 use crate::watcher::WatcherState;
 
@@ -255,6 +255,7 @@ fn load_watches_blocking(app: &AppHandle) -> WatchLoad {
             root,
             &plan.excludes,
             remaining,
+            MAX_SCAN_ENTRIES,
             &mut |path, is_dir, files| reporter.sample(path, is_dir, files),
         ) {
             Ok(outcome) => {
@@ -262,6 +263,13 @@ fn load_watches_blocking(app: &AppHandle) -> WatchLoad {
                     truncated = true;
                     warnings.push(format!(
                         "scan of {} truncated at the {MAX_FILES} file limit",
+                        root.display()
+                    ));
+                }
+                if outcome.entries_truncated {
+                    truncated = true;
+                    warnings.push(format!(
+                        "scan of {} stopped at the {MAX_SCAN_ENTRIES} entry limit; some documents may be missing (narrow the selector or add an exclude pattern)",
                         root.display()
                     ));
                 }
@@ -356,12 +364,19 @@ fn add_watch_blocking(app: &AppHandle, paths: Vec<String>) -> WatchAdded {
             &path,
             &excludes,
             remaining,
+            MAX_SCAN_ENTRIES,
             &mut |p, is_dir, files| reporter.sample(p, is_dir, files),
         ) {
             Ok(outcome) => {
                 if outcome.truncated {
                     warnings.push(format!(
                         "scan of {} truncated at the {MAX_FILES} file limit",
+                        path.display()
+                    ));
+                }
+                if outcome.entries_truncated {
+                    warnings.push(format!(
+                        "scan of {} stopped at the {MAX_SCAN_ENTRIES} entry limit; some documents may be missing (narrow the selector or add an exclude pattern)",
                         path.display()
                     ));
                 }

@@ -10,13 +10,24 @@ use crate::paths::{is_ignored_name, is_markdown, is_noise_name, ExcludeSet};
 /// directory, and the number of matching documents found so far.
 pub type ProgressSink<'a> = &'a mut dyn FnMut(&Path, bool, usize);
 
+/// Safety ceiling on entries visited by one walk.
+///
+/// A deep selector over a content store can contain millions of directories
+/// without matching a single document. The cap keeps startup bounded; hitting
+/// it sets `entries_truncated` so the caller can warn instead of pretending the
+/// inventory is complete.
+pub const MAX_SCAN_ENTRIES: usize = 100_000;
+
 /// Documents found below a root, plus the diagnostics the scan could not
 /// silently swallow.
 #[derive(Debug, Default)]
 pub struct ScanOutcome {
     pub files: Vec<PathBuf>,
     pub warnings: Vec<String>,
+    /// The document cap was reached.
     pub truncated: bool,
+    /// The walk stopped at `MAX_SCAN_ENTRIES` before visiting the whole tree.
+    pub entries_truncated: bool,
 }
 
 /// Recursively lists every Markdown document under `root`, sorted by path.
@@ -24,12 +35,14 @@ pub struct ScanOutcome {
 /// Hidden entries (`.git`, `.gitkeep`), editor backups (`plan.md~`), symlinks
 /// and the built-in noise directories are skipped; `excludes` removes matches
 /// on top. Unreadable subdirectories become warnings rather than failing the
-/// whole root. `max_files` caps the return value and reports truncation.
-/// Every visited entry is reported to `progress`.
+/// whole root. `max_files` caps the return value and `max_entries` bounds the
+/// work spent walking; both report truncation. Every visited entry is reported
+/// to `progress`.
 pub fn scan_markdown_with_progress(
     root: &Path,
     excludes: &ExcludeSet,
     max_files: usize,
+    max_entries: usize,
     progress: ProgressSink<'_>,
 ) -> Result<ScanOutcome, String> {
     if !root.is_dir() {
@@ -55,7 +68,12 @@ pub fn scan_markdown_with_progress(
             true
         });
 
-    for entry in entries {
+    for (visited, entry) in entries.enumerate() {
+        if visited >= max_entries {
+            outcome.entries_truncated = true;
+            break;
+        }
+
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {

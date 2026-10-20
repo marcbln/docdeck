@@ -2,6 +2,7 @@
 
 mod commands;
 mod config;
+mod detach;
 mod folder;
 mod paths;
 mod render;
@@ -38,6 +39,8 @@ fn startup_paths() -> Vec<CliEntry> {
 }
 
 pub fn run() {
+    detach::detach_from_terminal();
+
     let argv: Vec<String> = env::args().collect();
 
     // Must happen before any window exists: WebKitGTK reads these once, while

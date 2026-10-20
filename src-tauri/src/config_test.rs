@@ -244,6 +244,7 @@ mod tests {
             Limits {
                 max_roots: 2,
                 max_files: 10,
+                max_entries: usize::MAX,
             },
             &mut |_, _, _| {},
         );
@@ -279,6 +280,32 @@ mod tests {
     }
 
     #[test]
+    fn deep_glob_stops_at_the_entry_limit() {
+        let home = tempdir().unwrap();
+        for index in 0..5 {
+            fs::create_dir_all(home.path().join(format!("projects/p{index}/_ai"))).unwrap();
+        }
+
+        let plan = expand_with_limits_and_progress(
+            &config(&["~/projects/**/_ai"], &[]),
+            home.path(),
+            Limits {
+                max_roots: 10,
+                max_files: 10,
+                max_entries: 3,
+            },
+            &mut |_, _, _| {},
+        );
+
+        assert!(plan.truncated);
+        assert!(plan.roots.len() < 5);
+        assert!(plan
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("scan entry limit")));
+    }
+
+    #[test]
     fn file_cap_truncates_with_a_warning() {
         let home = tempdir().unwrap();
         fs::create_dir_all(home.path().join("notes")).unwrap();
@@ -291,6 +318,7 @@ mod tests {
             Limits {
                 max_roots: 10,
                 max_files: 1,
+                max_entries: usize::MAX,
             },
             &mut |_, _, _| {},
         );

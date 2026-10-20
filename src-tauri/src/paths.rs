@@ -19,7 +19,35 @@ pub struct CliEntry {
 
 /// Directory names that are never traversed or surfaced, whatever a selector
 /// says. `~/devel/*` would otherwise walk every build tree on a fresh config.
-pub const NOISE_DIRS: &[&str] = &["node_modules", "target", "dist", "build", ".venv", "venv"];
+///
+/// The runtime-data entries (`vendor`, `cache`, `media`, `thumbnail`,
+/// `thumbnails`, `bundles`, `sitemap`, `uploads`, `storage`, `var`, `logs`)
+/// matter most for broad `**` selectors: content stores such as a Shopware 6
+/// media/thumbnail tree can hold millions of directories but never documents.
+/// Python bytecode/cache and coverage output (`__pycache__`, `htmlcov`) are
+/// non-hidden, so they need an explicit entry; `.git`, `.venv` and the other
+/// dot-directories are already covered by the hidden-name rule.
+pub const NOISE_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "vendor",
+    "cache",
+    "media",
+    "thumbnail",
+    "thumbnails",
+    "bundles",
+    "sitemap",
+    "uploads",
+    "storage",
+    "var",
+    "logs",
+    "__pycache__",
+    "htmlcov",
+];
 
 /// Compiled `exclude` patterns. An empty set matches nothing; an invalid
 /// pattern is dropped with a warning rather than failing the whole config.
@@ -149,7 +177,7 @@ pub fn is_ignored_name(name: &str) -> bool {
 
 /// Built-in noise directories (`node_modules`, `target`, ...).
 pub fn is_noise_name(name: &str) -> bool {
-    NOISE_DIRS.contains(&name)
+    NOISE_DIRS.contains(&name) || name.ends_with(".egg-info")
 }
 
 /// Whether any component below `root` is hidden, a backup or a noise

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Release builds launched from a terminal now detach into their own session
+  (`fork` + `setsid`, mirroring Zed's CLI), so closing the terminal or exiting
+  the shell no longer sends `SIGHUP` and closes the window. `DOCDECK_FOREGROUND=1`
+  keeps docdeck attached; debug builds (`tauri dev`) stay attached too.
 - Config-driven watch registry: `~/.config/docdeck/config.toml` (XDG-aware,
   `$DOCDECK_CONFIG` overrides) with `watch` and `exclude` arrays. Selectors
   support `~`, `*` (one segment) and `**` (any depth); matched directories
@@ -44,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- Broad `**` selectors no longer walk content stores without bound: `vendor`,
+  `cache`, `media`, `thumbnail`, `thumbnails`, `bundles`, `sitemap`, `uploads`,
+  `storage`, `var`, `logs`, `__pycache__`, `htmlcov` and `*.egg-info` are now
+  pruned like `node_modules`, and every selector/root walk stops at 100,000
+  visited entries with a warning. Previously `/topdata/**/_ai` descended into a
+  Shopware 6 media/thumbnail tree with millions of folders before finishing.
 - Opening or switching to a document now starts at the top. Previously the
   renderer treated the empty (or previous) pane as "tailing" and scrolled the
   new document to its end; scroll preservation and tail-pinning now apply only

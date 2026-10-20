@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use globset::GlobBuilder;
 use walkdir::{DirEntry, WalkDir};
 
-use crate::folder::ProgressSink;
+use crate::folder::{ProgressSink, MAX_SCAN_ENTRIES};
 use crate::paths::{expand_tilde, is_ignored_name, is_noise_name, ExcludeSet};
 
 /// Hard ceiling on recursively watched roots per session.
@@ -43,6 +43,7 @@ pub struct WatchPlan {
 pub struct Limits {
     pub max_roots: usize,
     pub max_files: usize,
+    pub max_entries: usize,
 }
 
 impl Default for Limits {
@@ -50,6 +51,7 @@ impl Default for Limits {
         Self {
             max_roots: MAX_ROOTS,
             max_files: MAX_FILES,
+            max_entries: MAX_SCAN_ENTRIES,
         }
     }
 }
@@ -207,11 +209,23 @@ fn expand_selector(
 
     let mut matched_any = false;
     let mut cap_warned = false;
+    let mut entries_truncated = false;
 
-    for entry in walker
+    for (visited, entry) in walker
         .into_iter()
         .filter_entry(|entry| should_descend(entry, &excludes))
+        .enumerate()
     {
+        if visited >= limits.max_entries {
+            entries_truncated = true;
+            plan.truncated = true;
+            plan.warnings.push(format!(
+                "selector \"{selector}\" truncated: scan entry limit ({}) reached; narrow the selector or add an exclude pattern",
+                limits.max_entries
+            ));
+            break;
+        }
+
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
@@ -250,7 +264,7 @@ fn expand_selector(
         progress(entry.path(), is_dir, plan.roots.len() + plan.files.len());
     }
 
-    if !matched_any {
+    if !matched_any && !entries_truncated {
         plan.warnings.push(format!(
             "selector \"{selector}\" matched no files or directories"
         ));

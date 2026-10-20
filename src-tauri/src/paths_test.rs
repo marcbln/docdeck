@@ -38,6 +38,16 @@ mod tests {
         assert!(is_noise_name("node_modules"));
         assert!(is_noise_name("target"));
         assert!(is_noise_name(".venv"));
+        assert!(is_noise_name("media"));
+        assert!(is_noise_name("thumbnail"));
+        assert!(is_noise_name("thumbnails"));
+        assert!(is_noise_name("bundles"));
+        assert!(is_noise_name("sitemap"));
+        assert!(is_noise_name("uploads"));
+        assert!(is_noise_name("vendor"));
+        assert!(is_noise_name("__pycache__"));
+        assert!(is_noise_name("htmlcov"));
+        assert!(is_noise_name("docdeck.egg-info"));
         assert!(!is_noise_name("src"));
     }
 

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::folder::scan_markdown_with_progress;
+    use crate::folder::{scan_markdown_with_progress, MAX_SCAN_ENTRIES};
     use crate::paths::ExcludeSet;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -8,9 +8,14 @@ mod tests {
     use tempfile::tempdir;
 
     fn scan(root: &Path) -> (Vec<String>, bool) {
-        let outcome =
-            scan_markdown_with_progress(root, &ExcludeSet::default(), 1000, &mut |_, _, _| {})
-                .unwrap();
+        let outcome = scan_markdown_with_progress(
+            root,
+            &ExcludeSet::default(),
+            1000,
+            MAX_SCAN_ENTRIES,
+            &mut |_, _, _| {},
+        )
+        .unwrap();
         let mut names: Vec<String> = outcome
             .files
             .iter()
@@ -32,6 +37,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         fs::create_dir_all(dir.path().join("node_modules")).unwrap();
         fs::create_dir_all(dir.path().join("target")).unwrap();
+        fs::create_dir_all(dir.path().join("vol/www/public/media/1a")).unwrap();
         fs::write(dir.path().join("README.md"), "# root").unwrap();
         fs::write(dir.path().join("backlog/active/plan.md"), "# plan").unwrap();
         fs::write(dir.path().join("backlog/report.MD"), "# report").unwrap();
@@ -39,6 +45,7 @@ mod tests {
         fs::write(dir.path().join(".git/HEAD.md"), "nope").unwrap();
         fs::write(dir.path().join("node_modules/dep.md"), "nope").unwrap();
         fs::write(dir.path().join("target/out.md"), "nope").unwrap();
+        fs::write(dir.path().join("vol/www/public/media/1a/2b.md"), "nope").unwrap();
         fs::write(dir.path().join("backlog/plan.md~"), "nope").unwrap();
 
         let (names, truncated) = scan(dir.path());
@@ -63,6 +70,7 @@ mod tests {
             &file,
             &ExcludeSet::default(),
             1000,
+            MAX_SCAN_ENTRIES,
             &mut |_, _, _| {}
         )
         .is_err());
@@ -79,8 +87,14 @@ mod tests {
             ExcludeSet::build_lenient(&["**/drafts/**".to_string()], dir.path());
         assert!(warnings.is_empty());
 
-        let outcome =
-            scan_markdown_with_progress(dir.path(), &excludes, 1000, &mut |_, _, _| {}).unwrap();
+        let outcome = scan_markdown_with_progress(
+            dir.path(),
+            &excludes,
+            1000,
+            MAX_SCAN_ENTRIES,
+            &mut |_, _, _| {},
+        )
+        .unwrap();
         assert_eq!(outcome.files.len(), 1);
         assert!(outcome.files[0].ends_with("keep.md"));
     }
@@ -103,11 +117,38 @@ mod tests {
             fs::write(dir.path().join(format!("doc_{index}.md")), "# doc").unwrap();
         }
 
-        let outcome =
-            scan_markdown_with_progress(dir.path(), &ExcludeSet::default(), 3, &mut |_, _, _| {})
-                .unwrap();
+        let outcome = scan_markdown_with_progress(
+            dir.path(),
+            &ExcludeSet::default(),
+            3,
+            MAX_SCAN_ENTRIES,
+            &mut |_, _, _| {},
+        )
+        .unwrap();
         assert_eq!(outcome.files.len(), 3);
         assert!(outcome.truncated);
+    }
+
+    #[test]
+    fn stops_walking_at_the_entry_limit() {
+        let dir = tempdir().unwrap();
+        for index in 0..5 {
+            fs::create_dir_all(dir.path().join(format!("d{index}"))).unwrap();
+            fs::write(dir.path().join(format!("d{index}/plan.md")), "# plan").unwrap();
+        }
+
+        let outcome = scan_markdown_with_progress(
+            dir.path(),
+            &ExcludeSet::default(),
+            100,
+            4,
+            &mut |_, _, _| {},
+        )
+        .unwrap();
+
+        assert!(outcome.entries_truncated);
+        assert!(!outcome.truncated);
+        assert!(outcome.files.len() < 5);
     }
 
     #[test]
@@ -124,6 +165,7 @@ mod tests {
             dir.path(),
             &ExcludeSet::default(),
             100,
+            MAX_SCAN_ENTRIES,
             &mut |path, is_dir, files| {
                 if is_dir {
                     seen_dirs.push(
