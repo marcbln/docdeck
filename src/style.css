@@ -356,36 +356,84 @@ body {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin: 12px 16px 0 0;
-  padding: 6px 8px;
+  padding: 4px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.12);
+  transition:
+    border-color 0.15s ease-in-out,
+    box-shadow 0.15s ease-in-out;
+}
+
+/* One ring around the whole bar reads calmer than an outline hugging only
+   the input. */
+.find-bar:focus-within {
+  border-color: var(--accent-color);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.find-bar-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 9px;
+  background-color: var(--bg-primary);
   border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.find-bar-icon {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: color 0.15s ease-in-out;
+}
+
+.find-bar:focus-within .find-bar-icon {
+  color: var(--accent-color);
 }
 
 .find-bar-input {
-  width: 200px;
-  padding: 4px 6px;
-  background-color: var(--bg-primary);
+  width: 180px;
+  padding: 0;
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border: none;
   font-size: 12px;
+  line-height: 1.4;
+  appearance: none;
 }
 
 .find-bar-input:focus {
-  outline: 1px solid var(--accent-color);
-  outline-offset: 0;
+  outline: none;
+}
+
+.find-bar-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* The bar has its own close button; hide the native search decorations. */
+.find-bar-input::-webkit-search-cancel-button,
+.find-bar-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .find-bar-count {
-  min-width: 44px;
+  min-width: 40px;
+  padding: 0 4px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .find-bar-count.empty {
@@ -393,32 +441,52 @@ body {
 }
 
 .find-bar button {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 4px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
+  transition:
+    background 0.12s ease-in-out,
+    color 0.12s ease-in-out;
 }
 
 .find-bar button:hover:not(:disabled) {
-  background: var(--accent-color);
-  color: var(--bg-primary);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.find-bar button:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
 }
 
 .find-bar button:disabled {
   cursor: default;
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 .find-bar button.active,
 .find-bar button[aria-pressed="true"] {
   background: var(--accent-color);
   color: var(--bg-primary);
+}
+
+.find-bar-case {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.find-bar-close {
+  font-size: 15px;
 }
 
 ::highlight(docdeck-find-match) {

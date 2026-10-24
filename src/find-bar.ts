@@ -128,6 +128,15 @@ export class FindController {
     bar.className = "find-bar";
     bar.setAttribute("role", "search");
 
+    const field = document.createElement("div");
+    field.className = "find-bar-field";
+
+    const icon = document.createElement("span");
+    icon.className = "find-bar-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML =
+      '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.4"></circle><path d="m10.4 10.4 3.1 3.1"></path></svg>';
+
     this.input = document.createElement("input");
     this.input.type = "search";
     this.input.className = "find-bar-input";
@@ -152,8 +161,10 @@ export class FindController {
     this.caseButton.setAttribute("aria-pressed", "false");
     this.closeButton = makeButton("find-bar-close", "Close find", "×");
 
+    field.append(icon, this.input);
+
     bar.append(
-      this.input,
+      field,
       this.count,
       this.prevButton,
       this.nextButton,
@@ -362,7 +373,7 @@ export class FindController {
 
     this.count.textContent =
       total === 0 ? "0/0" : `${this.activeIndex + 1}/${total}`;
-    this.count.classList.toggle("empty", total === 0);
+    this.count.classList.toggle("empty", total === 0 && this.query.length > 0);
     this.prevButton.disabled = total === 0;
     this.nextButton.disabled = total === 0;
   }
