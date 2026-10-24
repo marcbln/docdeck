@@ -12,6 +12,7 @@ import {
   marked,
   renderMarkdown,
 } from "./markdown";
+import { closeMermaidOverlay } from "./mermaid-zoom";
 import { MetadataView } from "./metadata-jump";
 import {
   createPreferenceWriter,
@@ -700,6 +701,11 @@ class AppState {
    * elements the previous steps wrote.
    */
   private async renderActiveContent(): Promise<void> {
+    // A fullscreen diagram lives outside the viewer (moved into a fixed
+    // overlay). Close it before the viewer is detached so the placeholder is
+    // restored and `#app` is no longer inert.
+    closeMermaidOverlay();
+
     const tab = this.activePath ? this.tabs.get(this.activePath) : undefined;
 
     if (!tab) {

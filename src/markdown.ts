@@ -7,6 +7,11 @@ import hljs from "highlight.js/lib/common";
 import mermaid from "mermaid";
 
 import { mountCopyButtons } from "./copy-code";
+import {
+  clearMermaidZoomState,
+  closeMermaidOverlay,
+  enhanceMermaidDiagrams,
+} from "./mermaid-zoom";
 import type { ThemeMode } from "./preferences";
 import { LIGHT_MERMAID_VARIABLES } from "./theme";
 import type { Heading } from "./toc";
@@ -128,6 +133,9 @@ export async function renderMarkdown(
   headings: Heading[] = [],
   scroll: RenderScroll = "preserve",
 ): Promise<void> {
+  if (scroll === "top") clearMermaidZoomState();
+  else closeMermaidOverlay();
+
   const scrollParent = targetEl.parentElement;
   const previousScrollTop = scrollParent?.scrollTop ?? 0;
   const preserve = scroll === "preserve";
@@ -159,9 +167,11 @@ export async function renderMarkdown(
   for (const block of mermaidBlocks) {
     const pre = block.parentElement;
     if (!pre) continue;
+    const source = block.textContent ?? "";
     const container = document.createElement("div");
     container.className = "mermaid";
-    container.textContent = block.textContent ?? "";
+    container.dataset.mermaidSource = source;
+    container.textContent = source;
     pre.replaceWith(container);
   }
 
@@ -173,6 +183,8 @@ export async function renderMarkdown(
       console.error("Mermaid rendering failed", error);
     }
   }
+
+  enhanceMermaidDiagrams(targetEl);
 
   // Copy buttons go on last: mermaid promotion above already replaced
   // `pre > code.language-mermaid` with a diagram container, so a diagram never

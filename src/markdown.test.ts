@@ -65,6 +65,15 @@ describe("renderMarkdown", () => {
     expect(target.querySelector(".mermaid")).not.toBeNull();
   });
 
+  it("remembers a diagram's source before Mermaid replaces it", async () => {
+    await render(
+      ["```mermaid", "graph TD; A-->B;", "```"].join("\n"),
+    );
+
+    const diagram = target.querySelector<HTMLElement>(".mermaid");
+    expect(diagram?.dataset.mermaidSource).toContain("graph TD; A-->B;");
+  });
+
   it("copies a highlighted block as plain source", async () => {
     await render(['```js', 'const a = "x & y";', "```"].join("\n"));
 
