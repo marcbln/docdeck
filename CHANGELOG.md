@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Mermaid diagram pan/zoom: drag to pan, `Ctrl`/`Cmd` + wheel to zoom toward
+  the pointer, double-click or the toolbar to fit, keyboard controls, a
+  hover/focus toolbar with a percentage readout, and a fullscreen overlay.
+  Zoom/pan survives live reloads and theme switches and resets when the diagram
+  source changes.
 - Tab context menu: right-click any tab (or press `Shift+F10` / the ContextMenu
   key) to copy the document's absolute path to the clipboard. Copying confirms
   with a transient toast, and hovering anywhere on a tab now shows its full path

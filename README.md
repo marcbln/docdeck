@@ -40,6 +40,10 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   code blocks and Mermaid diagrams, with scroll position preserved across reloads.
 - **Copy code** — hover any code block for a button that puts its plain source on
   the clipboard and confirms with a checkmark. Diagrams are skipped.
+- **Diagram zoom & pan** — large Mermaid graphs open at fit-width and can be
+  dragged, zoomed with `Ctrl`/`Cmd` + wheel toward the pointer, or fitted with a
+  hover toolbar. The toolbar also opens a diagram fullscreen. Zoom and pan
+  survive live reloads and theme switches; editing a diagram resets its view.
 - **Frontmatter as a table** — YAML headers render as a collapsible, two-column
   metadata table instead of raw text, with a TOC entry that jumps to it.
 - **Table of contents** — an `h1`–`h4` outline in a collapsible sidebar that
@@ -168,6 +172,13 @@ surface.
 | `Aa` | Toggle case-sensitive matching |
 | `Esc` | Close the find bar and clear highlights |
 | `⧉` on a code block | Copy the snippet's source to the clipboard |
+| Drag a diagram | Pan the diagram |
+| `Ctrl` / `Cmd` + wheel over a diagram | Zoom toward the pointer |
+| Double-click a diagram / `fit` | Fit the whole diagram |
+| `+` / `-` / `0` on a focused diagram | Zoom in / out / fit |
+| Arrow keys on a focused diagram | Pan (hold `Shift` for larger steps) |
+| `⛶` on a diagram | Open it in the fullscreen overlay |
+| `Esc` in fullscreen | Close the overlay |
 | Click a row | Open the document (like clicking its tab) |
 | Click a tab | Activate it and clear its unread dot |
 | `×` on a tab | Close it and release its file watch (watched folders stay live) |
@@ -206,6 +217,8 @@ agent create, edit, delete and recreate documents inside it. See
 src/                  Frontend — tab state, layout, markdown rendering
   main.ts             AppState: tab registry, CLI events, watcher events, wiring
   markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
+  mermaid-zoom-math.ts Pure fit/zoom/pan geometry for diagram viewports
+  mermaid-zoom.ts     Mermaid viewport controller, source-keyed state, fullscreen
   copy-code.ts        Clipboard write with fallback, per-block copy buttons
   find-text.ts        Visible-text flattening, literal matching, DOM ranges
   find-bar.ts         Floating find bar, match state, CSS highlight painting
