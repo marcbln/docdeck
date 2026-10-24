@@ -146,7 +146,9 @@ an amber dot changed since docdeck started; opening the row or activating its
 tab clears the mark. New files appear bold without opening a tab; deleted files
 keep a struck-through row with their last modification time until they
 reappear or the app restarts. Unread is session-scoped: a restart clears all
-bold, and closing an unread tab does not.
+bold, and closing an unread tab does not. The inbox renders only the rows
+visible in the panel (plus a small overscan), so thousands of matched documents
+do not affect tab switching or the first paint.
 
 Running `docdeck <folder>` adds that folder as a **session watch** alongside
 the config and lists its files in the same inbox; `docdeck <file>` opens a tab.
@@ -220,7 +222,7 @@ src/                  Frontend — tab state, layout, markdown rendering
   project.ts          Path/components helpers: parent, project chip, compaction
   relative-time.ts    Deterministic short relative timestamps
   inbox-model.ts      Session unread/deleted state, sorted inbox rows
-  inbox-panel.ts      Inbox DOM renderer, diagnostics and row actions
+  inbox-panel.ts      Windowed inbox renderer: fixed-height row pool, visible-range painting
   style.css           Catppuccin Mocha + Latte, layouts, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
@@ -255,6 +257,9 @@ document.
   appears as a bold inbox row (no tab opens automatically). (Watched *folders*
   do survive write-to-temp-then-rename saves, which a purely per-file watch
   could not follow.)
+- **Native find sees only the rendered inbox window.** The inbox keeps just the
+  visible rows in the DOM, so the browser's find bar cannot match rows scrolled
+  out of view. docdeck has no in-app inbox search.
 - **Config is read once.** Editing `config.toml` requires a restart; there is no
   live reload or in-app editor. CLI folders are session-only — put them in the
   config to restore them on the next launch.

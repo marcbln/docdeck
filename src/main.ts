@@ -265,6 +265,7 @@ class AppState {
       onChange: (next) => {
         this.preferences.inboxVisible = next;
         this.inboxPanelEl.hidden = !next;
+        if (next) this.inboxPanel.refresh();
         this.persist();
       },
     });
@@ -327,14 +328,30 @@ class AppState {
 
       // A batch of settled writes from the debounced inotify watcher.
       await listen<PathChange[]>("paths-changed", (event) => {
-        for (const change of event.payload) void this.applyPathChange(change);
+        let inboxChanged = false;
+        let tabsChanged = false;
+        let activeDeleted = false;
+        const reloads: string[] = [];
+
+        for (const change of event.payload) {
+          const result = this.applyPathChange(change);
+          inboxChanged ||= result.inboxChanged;
+          tabsChanged ||= result.tabsChanged;
+          activeDeleted ||= result.activeDeleted;
+          if (result.reload) reloads.push(change.path);
+        }
+
+        if (tabsChanged) this.renderTabs();
+        if (inboxChanged) this.renderInbox();
+        if (activeDeleted) void this.renderActiveContent();
+        for (const path of reloads) void this.reloadDocument(path);
       });
 
       // Live position of the (possibly minutes-long) config or folder scan.
       await listen<ScanProgress>("scan-progress", (event) => {
         if (this.scansInFlight === 0) return;
         this.inboxStatus = { ...this.inboxStatus, progress: event.payload };
-        this.renderInbox();
+        this.inboxPanel.setProgress(event.payload);
       });
     } catch (error) {
       console.error("Failed to attach backend listeners", error);
@@ -382,20 +399,26 @@ class AppState {
    * reload their tab when one is open and update the inbox row. Nothing is
    * ever opened automatically: the inbox is the triage surface.
    */
-  private async applyPathChange(change: PathChange): Promise<void> {
+  private applyPathChange(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
     const tab = this.tabs.get(change.path);
     const isActive = this.activePath === change.path;
     const tracked =
       this.inbox.has(change.path) || isUnderAny(change.path, this.watchRoots);
 
     if (!change.exists) {
-      if (tab && !tab.deletedOnDisk) {
-        tab.deletedOnDisk = true;
-        this.renderTabs();
-        if (isActive) await this.renderActiveContent();
-      }
-      if (tracked && this.inbox.markDeleted(change.path)) this.renderInbox();
-      return;
+      const wasDeleted = tab?.deletedOnDisk ?? false;
+      if (tab && !wasDeleted) tab.deletedOnDisk = true;
+      return {
+        inboxChanged: tracked && this.inbox.markDeleted(change.path),
+        tabsChanged: tab !== undefined && !wasDeleted,
+        activeDeleted: isActive && tab !== undefined && !wasDeleted,
+        reload: false,
+      };
     }
 
     if (tracked) {
@@ -406,11 +429,20 @@ class AppState {
       };
       // The active document is on screen already: update its mtime and order
       // without pretending the reader missed something.
-      this.inbox.upsert(seed, !isActive);
-      this.renderInbox();
+      return {
+        inboxChanged: this.inbox.upsert(seed, !isActive),
+        tabsChanged: false,
+        activeDeleted: false,
+        reload: tab !== undefined,
+      };
     }
 
-    if (tab) await this.reloadDocument(change.path);
+    return {
+      inboxChanged: false,
+      tabsChanged: false,
+      activeDeleted: false,
+      reload: tab !== undefined,
+    };
   }
 
   private async reloadDocument(path: string): Promise<void> {
@@ -459,6 +491,7 @@ class AppState {
   }
 
   public setActiveTab(path: string): void {
+    const previous = this.activePath;
     this.activePath = path;
     const tab = this.tabs.get(path);
     if (tab) tab.hasUnreadUpdate = false;
@@ -470,9 +503,9 @@ class AppState {
     }
 
     this.inbox.markRead(path);
+    this.inboxPanel.setActive(previous, path, this.inbox.unreadCount());
 
     this.renderTabs();
-    this.renderInbox();
     void this.renderActiveContent();
   }
 

@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- Inbox rendering no longer rebuilds every row on tab activation or on each
+  watcher event. The inbox now paints only the visible rows from a recycled
+  pool, so switching tabs with thousands of watched documents stays
+  interactive and the first inbox paint no longer blocks the UI.
 - `**` expansion now walks breadth-first instead of depth-first, so one huge
   project can no longer consume the 100,000-entry budget before sibling
   directories are visited. Bounded selectors (`/shops/*/plugins/*/_ai`) now
