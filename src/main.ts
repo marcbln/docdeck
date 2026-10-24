@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { copyText } from "./copy-code";
 import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
 import { InboxModel, type InboxSeed } from "./inbox-model";
@@ -19,10 +20,12 @@ import {
   type ThemeMode,
 } from "./preferences";
 import { fileName, isUnderAny } from "./project";
+import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
 import { extractHeadings } from "./toc";
 import { TocPanel } from "./toc-panel";
 import { ThemeController } from "./theme";
+import { ToastHost } from "./toast";
 
 interface FilePayload {
   path: string;
@@ -120,6 +123,8 @@ class AppState {
   private readonly writer = createPreferenceWriter();
   private readonly tocPanel: TocPanel;
   private readonly find: FindController;
+  private readonly tabMenu: TabContextMenu;
+  private readonly toast = new ToastHost();
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
 
@@ -158,6 +163,10 @@ class AppState {
       viewer: this.viewer,
       scrollParent: this.contentContainer,
       hasDocument: () => this.activePath !== null,
+    });
+
+    this.tabMenu = new TabContextMenu((path) => {
+      void this.copyTabPath(path);
     });
 
     // Expanding or folding the metadata table changes which text is visible.
@@ -498,6 +507,15 @@ class AppState {
     await this.closeTabPath(path);
   }
 
+  /** Copies the tab's absolute path and reports the outcome with a toast. */
+  private async copyTabPath(path: string): Promise<void> {
+    const copied = await copyText(path);
+    this.toast.show(
+      copied ? "Path copied" : "Copy failed",
+      copied ? "info" : "error",
+    );
+  }
+
   // -- watch registry and inbox ---------------------------------------------
 
   /** Loads the global config and turns it into watches plus inbox rows. */
@@ -584,11 +602,37 @@ class AppState {
       if (tab.hasUnreadUpdate) item.classList.add("has-update");
       if (tab.path === this.activeUpdatePath) item.classList.add("active-update");
       if (tab.deletedOnDisk) item.classList.add("deleted");
+      item.title = tab.deletedOnDisk
+        ? `${tab.path} (deleted on disk)`
+        : tab.path;
       item.addEventListener("click", () => this.setActiveTab(tab.path));
+      item.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        // A keyboard-opened menu may be followed by the webview's own
+        // contextmenu event; never reposition an already-open menu to (0, 0).
+        if (this.tabMenu.isOpen) return;
+        this.tabMenu.open(
+          tab.path,
+          { x: event.clientX, y: event.clientY },
+          item,
+        );
+      });
       item.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           this.setActiveTab(tab.path);
+          return;
+        }
+        if (
+          event.key === "ContextMenu" ||
+          (event.shiftKey && event.key === "F10")
+        ) {
+          event.preventDefault();
+          this.tabMenu.open(
+            tab.path,
+            { rect: item.getBoundingClientRect() },
+            item,
+          );
         }
       });
 
@@ -598,9 +642,6 @@ class AppState {
       const title = document.createElement("span");
       title.className = "tab-title";
       title.textContent = tab.filename;
-      title.title = tab.deletedOnDisk
-        ? `${tab.path} (deleted on disk)`
-        : tab.path;
 
       const close = document.createElement("span");
       close.className = "tab-close";

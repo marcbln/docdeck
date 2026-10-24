@@ -27,6 +27,9 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Top tabs or left sidebar** — toggle the tab bar between a horizontal strip and
   a vertical rail for deep directory trees.
 - **Auto-sort by last update** — bump the documents an agent just touched to the top.
+- **Copy a tab's path** — right-click any tab (or press `Shift+F10` / the
+  ContextMenu key) to copy the document's absolute path. Hovering a tab shows
+  the same path as a tooltip, and a short toast confirms the copy.
 - **Single-instance CLI** — running `docdeck <file>` or `docdeck <folder>` from any
   terminal reaches the *running* window instead of starting a second process.
 - **Survives the terminal** — release builds launched from a shell detach into
@@ -207,7 +210,9 @@ src/                  Frontend — tab state, layout, markdown rendering
   frontmatter.ts      YAML header split + parse into table rows
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
+  tab-menu.ts         Right-click menu for tabs: positioning, dismissal, focus
   theme.ts            Stylesheet swap, Catppuccin Latte, mermaid theming
+  toast.ts            Transient themed status messages
   metadata-table.ts   Frontmatter <details> table view
   metadata-jump.ts    Metadata collapsed state and reveal
   toolbar.ts          Reusable toggle button

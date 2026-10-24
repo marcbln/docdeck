@@ -3,7 +3,8 @@ filename: "_ai/backlog/active/261024_1006__IMPLEMENTATION_PLAN__tab_context_menu
 title: "Tab context menu: copy absolute path with tooltip and toast feedback"
 createdAt: 2026-10-24 10:06
 updatedAt: 2026-10-24 10:06
-status: draft
+status: completed
+completedAt: 2026-10-24 10:18
 priority: medium
 tags: [ui, tabs, clipboard, context-menu, accessibility]
 estimatedComplexity: simple
@@ -878,6 +879,7 @@ planFile: "_ai/backlog/active/261024_1006__IMPLEMENTATION_PLAN__tab_context_menu
 specFile: ""
 project: "docdeck"
 status: completed
+completedAt: 2026-10-24 10:18
 filesCreated: 0
 filesModified: 0
 filesDeleted: 0

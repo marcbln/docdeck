@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Tab context menu: right-click any tab (or press `Shift+F10` / the ContextMenu
+  key) to copy the document's absolute path to the clipboard. Copying confirms
+  with a transient toast, and hovering anywhere on a tab now shows its full path
+  as a tooltip.
 - In-document find: `Ctrl+F` (or `Cmd+F`) opens a floating find bar with
   Chrome-style yellow highlighting for every match and an orange active match,
   an `n/m` counter, case toggle, `Enter`/`Shift+Enter` navigation, and
