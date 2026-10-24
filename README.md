@@ -41,6 +41,11 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   metadata table instead of raw text, with a TOC entry that jumps to it.
 - **Table of contents** — an `h1`–`h4` outline in a collapsible sidebar that
   tracks the reading position as you scroll.
+- **In-document find** — `Ctrl+F` (or `Cmd+F`) opens a floating find bar with
+  Chrome-style highlighting: every match is yellow, the active match is orange,
+  and a `n/m` counter tracks your position. `Enter`/`Shift+Enter` step through
+  matches, `Aa` toggles case sensitivity, and the search survives live reloads
+  without losing your place.
 - **Light and dark themes** — Catppuccin Mocha and Latte, covering the app
   chrome, GitHub markdown styles, syntax highlighting and Mermaid diagrams.
 
@@ -153,6 +158,10 @@ surface.
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
 | `☀ Theme` | Switch between the dark and light palettes |
+| `Ctrl+F` / `Cmd+F` | Find in the active document |
+| `Enter` / `Shift+Enter` | Next / previous match (wraps around) |
+| `Aa` | Toggle case-sensitive matching |
+| `Esc` | Close the find bar and clear highlights |
 | `⧉` on a code block | Copy the snippet's source to the clipboard |
 | Click a row | Open the document (like clicking its tab) |
 | Click a tab | Activate it and clear its unread dot |
@@ -193,6 +202,8 @@ src/                  Frontend — tab state, layout, markdown rendering
   main.ts             AppState: tab registry, CLI events, watcher events, wiring
   markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
   copy-code.ts        Clipboard write with fallback, per-block copy buttons
+  find-text.ts        Visible-text flattening, literal matching, DOM ranges
+  find-bar.ts         Floating find bar, match state, CSS highlight painting
   frontmatter.ts      YAML header split + parse into table rows
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading

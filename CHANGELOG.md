@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- In-document find: `Ctrl+F` (or `Cmd+F`) opens a floating find bar with
+  Chrome-style yellow highlighting for every match and an orange active match,
+  an `n/m` counter, case toggle, `Enter`/`Shift+Enter` navigation, and
+  live-reload persistence.
 - Release builds launched from a terminal now detach into their own session
   (`fork` + `setsid`, mirroring Zed's CLI), so closing the terminal or exiting
   the shell no longer sends `SIGHUP` and closes the window. `DOCDECK_FOREGROUND=1`
