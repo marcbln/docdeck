@@ -12,6 +12,10 @@
   --accent-color: #89b4fa;
   --dot-color: #fab387;
   --danger-color: #f38ba8;
+  --find-match-bg: #f9e2af;
+  --find-match-fg: #1e1e2e;
+  --find-current-bg: #fab387;
+  --find-current-fg: #1e1e2e;
   color-scheme: dark;
 }
 
@@ -32,6 +36,10 @@
   --accent-color: #1e66f5;
   --dot-color: #fe640b;
   --danger-color: #d20f39;
+  --find-match-bg: #f9e2af;
+  --find-match-fg: #4c4f69;
+  --find-current-bg: #fe640b;
+  --find-current-fg: #eff1f5;
   color-scheme: light;
 }
 
@@ -319,6 +327,107 @@ body {
   overflow-y: auto;
   position: relative;
   background: var(--bg-primary);
+}
+
+/* --------------------------------------------------------------------------
+   In-document find
+
+   The layer is sticky inside the scroll pane and has zero height: the bar
+   floats over the document without reflowing it. `pointer-events: none` lets
+   clicks pass through the empty part of the layer.
+   -------------------------------------------------------------------------- */
+
+.find-bar-layer {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  height: 0;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.find-bar-layer[hidden] {
+  display: none;
+}
+
+.find-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 12px 16px 0 0;
+  padding: 6px 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.find-bar-input {
+  width: 200px;
+  padding: 4px 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.find-bar-input:focus {
+  outline: 1px solid var(--accent-color);
+  outline-offset: 0;
+}
+
+.find-bar-count {
+  min-width: 44px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.find-bar-count.empty {
+  color: var(--danger-color);
+}
+
+.find-bar button {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.find-bar button:hover:not(:disabled) {
+  background: var(--accent-color);
+  color: var(--bg-primary);
+}
+
+.find-bar button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.find-bar button.active,
+.find-bar button[aria-pressed="true"] {
+  background: var(--accent-color);
+  color: var(--bg-primary);
+}
+
+::highlight(docdeck-find-match) {
+  background-color: var(--find-match-bg);
+  color: var(--find-match-fg);
+}
+
+::highlight(docdeck-find-current) {
+  background-color: var(--find-current-bg);
+  color: var(--find-current-fg);
 }
 
 .markdown-body {

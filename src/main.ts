@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
 import { InboxModel, type InboxSeed } from "./inbox-model";
 import { InboxPanel, type InboxStatus, type ScanProgress } from "./inbox-panel";
@@ -118,6 +119,7 @@ class AppState {
 
   private readonly writer = createPreferenceWriter();
   private readonly tocPanel: TocPanel;
+  private readonly find: FindController;
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
 
@@ -151,6 +153,21 @@ class AppState {
       scrollParent: this.contentContainer,
       onJumpToMetadata: () => this.metadata.reveal(),
     });
+
+    this.find = new FindController({
+      viewer: this.viewer,
+      scrollParent: this.contentContainer,
+      hasDocument: () => this.activePath !== null,
+    });
+
+    // Expanding or folding the metadata table changes which text is visible.
+    // `toggle` does not bubble, so listen in the capture phase.
+    this.viewer.addEventListener(
+      "toggle",
+      () => this.find.refresh(this.find.captureAnchor()),
+      true,
+    );
+
     this.theme = new ThemeController({
       onMermaidThemeChange: applyMermaidTheme,
       // Mermaid bakes colors into the SVG at render time, so a mode change has
@@ -269,6 +286,7 @@ class AppState {
         const table = this.viewer.querySelector("details.metadata-table");
         if (table) table.remove();
         if (next) void this.renderActiveContent();
+        else this.find.refresh(this.find.captureAnchor());
         this.persist();
       },
     });
@@ -611,6 +629,7 @@ class AppState {
     const tab = this.activePath ? this.tabs.get(this.activePath) : undefined;
 
     if (!tab) {
+      this.find.close();
       this.renderedPath = null;
       this.emptyState.classList.remove("hidden");
       this.viewer.classList.add("hidden");
@@ -626,6 +645,11 @@ class AppState {
     // A different document starts at the top; only a re-render of the document
     // already on screen may inherit its scroll offset.
     const switching = this.activePath !== this.renderedPath;
+    if (switching) this.find.close();
+
+    // Capture before `replaceChildren()` detaches the ranges. A tab switch
+    // closes the bar above, so only a same-document repaint has an anchor.
+    const findAnchor = switching ? null : this.find.captureAnchor();
     this.renderedPath = this.activePath;
 
     const { raw, body } = splitFrontmatter(tab.content);
@@ -661,8 +685,14 @@ class AppState {
       this.tocPanel.rebuild(headings);
     } catch (error) {
       console.error("Failed to render markdown", error);
+      this.find.close();
       this.showMessage(`Could not render ${tab.filename}`);
     }
+
+    // Refresh after every render path. The metadata table is mounted before
+    // this point and the deletion banner may be prepended, so searching any
+    // earlier would miss nodes or compute against a body about to change.
+    this.find.refresh(findAnchor);
   }
 
   private showMessage(message: string): void {
