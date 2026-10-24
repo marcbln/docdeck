@@ -14,6 +14,7 @@ changed decision is a new ADR that supersedes the old one.
 | [261019-1](ADR__261019-1__config-driven-watch-registry.md) | Config-driven watch registry replaces the folder picker | Accepted | 2026-10-19 |
 | [261019-2](ADR__261019-2__session-scoped-unread-inbox.md) | Session-scoped unread inbox with an active-tab flash | Accepted | 2026-10-19 |
 | [261024-1](ADR__261024-1__css-custom-highlight-api-for-in-document-find.md) | CSS Custom Highlight API for in-document find | Accepted | 2026-10-24 |
+| [261024-2](ADR__261024-2__custom-html-context-menu.md) | Custom HTML context menu for in-app right-click actions | Accepted | 2026-10-24 |
 
 ## Format
 
