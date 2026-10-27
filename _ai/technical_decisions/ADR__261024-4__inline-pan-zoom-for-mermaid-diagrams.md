@@ -66,6 +66,24 @@ model implemented in `src/mermaid-zoom.ts` (`enhanceMermaidDiagrams`).
 The pure geometry (fit scales, cursor-anchored zoom, translation clamping) is
 isolated in `src/mermaid-zoom-math.ts` so it is testable without layout.
 
+## Amendment (2026-10-26): per-diagram inline toggle
+
+The zoom viewport is useful for dense graphs but heavier than necessary for
+diagrams that read well at document scale. The hover toolbar therefore gained an
+inline toggle per diagram.
+
+- `ViewMode` gains `inline`. The controller stays mounted so the same toolbar
+  can switch back, but `.mermaid--inline` neutralises the stage transform and
+  puts the stage back into flow. The SVG keeps its natural aspect and is capped
+  at the column width (`max-width: 100%`), so the document scrollbar scrolls the
+  page as it did before the zoom layer existed.
+- While inline, pan/zoom/fit/fullscreen input and controls are suppressed; only
+  the inline toggle stays in the toolbar.
+- Inline is a saved view state. It survives live reloads and theme switches, and
+  the pre-inline fit/custom view is remembered so toggling back restores it.
+  It is still cleared when a different document opens, like every other saved
+  view.
+
 ## Consequences
 
 Positive:

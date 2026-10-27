@@ -630,6 +630,45 @@ body {
   max-width: none;
 }
 
+/* Inline mode puts the diagram back in the document flow: natural aspect,
+   capped at the column width, with the page scrollbar handling the document.
+   The stage transform is neutralised; the controller short-circuits pan/zoom
+   input while this class is present. */
+.mermaid--inline {
+  cursor: default;
+  min-height: 0;
+  max-height: none;
+  padding: 16px;
+}
+
+.mermaid--inline .mermaid-stage {
+  position: static;
+  transform: none !important;
+}
+
+.mermaid--inline .mermaid-stage svg {
+  display: block;
+  margin: 0 auto;
+  height: auto !important;
+  max-width: 100% !important;
+}
+
+.mermaid--inline .mermaid-toolbar__zoom,
+.mermaid--inline .mermaid-toolbar__button[data-action="zoom-out"],
+.mermaid--inline .mermaid-toolbar__button[data-action="zoom-in"],
+.mermaid--inline .mermaid-toolbar__button[data-action="fit"],
+.mermaid--inline .mermaid-toolbar__button[data-action="fullscreen"] {
+  display: none;
+}
+
+.mermaid--fullscreen .mermaid-toolbar__button[data-action="inline"] {
+  display: none;
+}
+
+.mermaid-toolbar__button[aria-pressed="true"] {
+  color: var(--accent-color);
+}
+
 /* Toolbar: hidden until hover/focus, visible while a custom view is active. */
 .mermaid-toolbar {
   position: absolute;

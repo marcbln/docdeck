@@ -300,6 +300,107 @@ describe("persistent view state", () => {
   });
 });
 
+describe("inline mode", () => {
+  it("returns the diagram to document flow and restores the zoomed view", () => {
+    const root = mountDiagram("graph TD; A-->B;");
+    const diagram = root.querySelector<HTMLElement>(".mermaid");
+    const inline = root.querySelector<HTMLButtonElement>(
+      '[data-action="inline"]',
+    );
+    if (!diagram || !inline) throw new Error("diagram or inline button missing");
+
+    root.querySelector<HTMLButtonElement>('[data-action="zoom-in"]')?.click();
+    const transform = stageTransform(root);
+    expect(percentage(root)).toBe("63%");
+
+    inline.click();
+    expect(diagram.classList.contains("mermaid--inline")).toBe(true);
+    expect(diagram.style.height).toBe("");
+    expect(diagram.getAttribute("tabindex")).toBeNull();
+    expect(inline.getAttribute("aria-pressed")).toBe("true");
+    expect(inline.getAttribute("aria-label")).toBe("Show zoom controls");
+
+    inline.click();
+    expect(diagram.classList.contains("mermaid--inline")).toBe(false);
+    expect(diagram.getAttribute("tabindex")).toBe("0");
+    expect(percentage(root)).toBe("63%");
+    expect(stageTransform(root)).toBe(transform);
+    expect(inline.getAttribute("aria-pressed")).toBe("false");
+    expect(inline.getAttribute("aria-label")).toBe("Show diagram inline");
+  });
+
+  it("stays inline after a repaint and remembers the previous zoom", () => {
+    const root = mountDiagram("graph TD; A-->B;");
+    root.querySelector<HTMLButtonElement>('[data-action="zoom-in"]')?.click();
+
+    const zoomedPercentage = percentage(root);
+    const zoomedTransform = stageTransform(root);
+    root.querySelector<HTMLButtonElement>('[data-action="inline"]')?.click();
+
+    const repainted = mountDiagram("graph TD; A-->B;");
+    const diagram = repainted.querySelector(".mermaid");
+    expect(diagram?.classList.contains("mermaid--inline")).toBe(true);
+
+    repainted
+      .querySelector<HTMLButtonElement>('[data-action="inline"]')
+      ?.click();
+    expect(percentage(repainted)).toBe(zoomedPercentage);
+    expect(stageTransform(repainted)).toBe(zoomedTransform);
+  });
+
+  it("ignores wheel zoom, keyboard, drag and double-click while inline", () => {
+    const root = mountDiagram("graph TD; A-->B;");
+    const diagram = root.querySelector<HTMLElement>(".mermaid");
+    if (!diagram) throw new Error("diagram missing");
+    root.querySelector<HTMLButtonElement>('[data-action="inline"]')?.click();
+
+    const transform = stageTransform(root);
+    const percent = percentage(root);
+
+    diagram.dispatchEvent(
+      wheelEvent({
+        deltaY: -100,
+        ctrlKey: true,
+        clientX: 400,
+        clientY: 200,
+      }),
+    );
+    expect(percentage(root)).toBe(percent);
+
+    dispatchKey(diagram, "+");
+    expect(percentage(root)).toBe(percent);
+
+    diagram.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 100,
+      }) as PointerEvent,
+    );
+    window.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 20,
+      }) as PointerEvent,
+    );
+    window.dispatchEvent(
+      new MouseEvent("pointerup", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 20,
+      }) as PointerEvent,
+    );
+    expect(stageTransform(root)).toBe(transform);
+
+    diagram.dispatchEvent(
+      new MouseEvent("dblclick", { bubbles: true, cancelable: true }),
+    );
+    expect(percentage(root)).toBe(percent);
+  });
+});
+
 describe("fullscreen overlay", () => {
   it("moves the viewport into an overlay and restores it on Escape", () => {
     const root = mountDiagram("graph TD; A-->B;");

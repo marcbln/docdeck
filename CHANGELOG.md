@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Mermaid diagrams can switch per diagram between the zoom panel and normal
+  in-document flow (natural aspect, capped at the column width, page scrollbar)
+  from a new toolbar button. The choice survives live reloads and remembers the
+  zoom view to return to.
 - Mermaid diagram pan/zoom: drag to pan, `Ctrl`/`Cmd` + wheel to zoom toward
   the pointer, double-click or the toolbar to fit, keyboard controls, a
   hover/focus toolbar with a percentage readout, and a fullscreen overlay.

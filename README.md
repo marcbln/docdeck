@@ -42,7 +42,8 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   the clipboard and confirms with a checkmark. Diagrams are skipped.
 - **Diagram zoom & pan** — large Mermaid graphs open at fit-width and can be
   dragged, zoomed with `Ctrl`/`Cmd` + wheel toward the pointer, or fitted with a
-  hover toolbar. The toolbar also opens a diagram fullscreen. Zoom and pan
+  hover toolbar. The toolbar also opens a diagram fullscreen and can switch it
+  back to a normal in-document view capped at the column width. Zoom and pan
   survive live reloads and theme switches; editing a diagram resets its view.
 - **Frontmatter as a table** — YAML headers render as a collapsible, two-column
   metadata table instead of raw text, with a TOC entry that jumps to it.
@@ -178,6 +179,7 @@ surface.
 | `+` / `-` / `0` on a focused diagram | Zoom in / out / fit |
 | Arrow keys on a focused diagram | Pan (hold `Shift` for larger steps) |
 | `⛶` on a diagram | Open it in the fullscreen overlay |
+| The inline button on a diagram | Switch between the zoom panel and normal document flow |
 | `Esc` in fullscreen | Close the overlay |
 | Click a row | Open the document (like clicking its tab) |
 | Click a tab | Activate it and clear its unread dot |

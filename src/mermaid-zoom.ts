@@ -15,10 +15,15 @@ import {
 } from "./mermaid-zoom-math";
 
 /** How the current view was produced; decides what a repaint restores. */
-type ViewMode = "fit-width" | "fit-whole" | "custom";
+type ViewMode = "fit-width" | "fit-whole" | "custom" | "inline";
+
+/** Modes that use the measured viewport and stage transform. */
+type EnhancedMode = Exclude<ViewMode, "inline">;
 
 interface SavedView extends ZoomTransform {
   mode: ViewMode;
+  /** View to return to when leaving `inline`; set only for inline entries. */
+  returnMode?: EnhancedMode;
 }
 
 /** Source-keyed views that survive wholesale viewer repaints. */
@@ -41,6 +46,9 @@ const FIT_ICON =
 
 const FULLSCREEN_ICON =
   '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
+
+const INLINE_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 8.5h7M4.5 11h4"/></svg>';
 
 /** Overridable in tests; the real webview supplies the layout box. */
 export type MeasureViewport = (container: HTMLElement) => Size;
@@ -245,10 +253,15 @@ class MermaidZoom {
   private readonly measure: MeasureViewport;
   private readonly stage: HTMLDivElement;
   private readonly percentLabel: HTMLSpanElement;
+  private readonly inlineButton: HTMLButtonElement;
   private readonly fullscreenButton: HTMLButtonElement;
 
   private transform: ZoomTransform = { scale: 1, x: 0, y: 0 };
   private mode: ViewMode = "fit-width";
+  private inlineReturn: {
+    mode: EnhancedMode;
+    transform: ZoomTransform;
+  } | null = null;
   private size: Size = { width: 0, height: 0 };
   private drag: DragState | null = null;
   private suppressClick = false;
@@ -275,6 +288,13 @@ class MermaidZoom {
     this.percentLabel.className = "mermaid-toolbar__zoom";
     this.percentLabel.setAttribute("aria-live", "polite");
     this.percentLabel.textContent = "100%";
+
+    this.inlineButton = iconButton(
+      doc,
+      "inline",
+      "Show diagram inline",
+      INLINE_ICON,
+    );
 
     this.fullscreenButton = iconButton(
       doc,
@@ -312,24 +332,26 @@ class MermaidZoom {
       this.percentLabel,
       zoomIn,
       fit,
+      this.inlineButton,
       this.fullscreenButton,
     );
 
     this.viewport.classList.add("mermaid--enhanced");
-    this.viewport.tabIndex = 0;
-    this.viewport.setAttribute("role", "group");
-    this.viewport.setAttribute(
-      "aria-label",
-      "Mermaid diagram. Use plus and minus to zoom and arrow keys to pan.",
-    );
+    this.updateViewportA11y();
     this.viewport.replaceChildren(this.stage, toolbar);
     this.viewport.dataset.zoomEnhanced = "true";
+    this.updateInlineButton();
 
-    zoomOut.addEventListener("click", () =>
-      this.zoomAroundCenter(1 / ZOOM_STEP),
-    );
-    zoomIn.addEventListener("click", () => this.zoomAroundCenter(ZOOM_STEP));
-    fit.addEventListener("click", () => this.fitWhole());
+    zoomOut.addEventListener("click", () => {
+      if (this.mode !== "inline") this.zoomAroundCenter(1 / ZOOM_STEP);
+    });
+    zoomIn.addEventListener("click", () => {
+      if (this.mode !== "inline") this.zoomAroundCenter(ZOOM_STEP);
+    });
+    fit.addEventListener("click", () => {
+      if (this.mode !== "inline") this.fitWhole();
+    });
+    this.inlineButton.addEventListener("click", () => this.toggleInline());
     this.fullscreenButton.addEventListener("click", () =>
       this.toggleFullscreen(),
     );
@@ -341,10 +363,12 @@ class MermaidZoom {
     this.viewport.addEventListener("keydown", this.onKeyDown);
 
     this.size = this.measure(this.viewport);
-    if (this.size.width > 0) {
+    const saved = viewRegistry.get(this.key);
+    if (saved?.mode === "inline") {
+      this.restore(saved);
+    } else if (this.size.width > 0) {
       this.applyFittedHeight(this.size.width);
       this.size = this.measure(this.viewport);
-      const saved = viewRegistry.get(this.key);
       if (saved) this.restore(saved);
       else this.fitWidth();
     } else {
@@ -385,8 +409,10 @@ class MermaidZoom {
   }
 
   private paintTransform(): void {
-    this.stage.style.transform = `translate(${this.transform.x}px, ${this.transform.y}px) scale(${this.transform.scale})`;
-    this.percentLabel.textContent = `${Math.round(this.transform.scale * 100)}%`;
+    if (this.mode !== "inline") {
+      this.stage.style.transform = `translate(${this.transform.x}px, ${this.transform.y}px) scale(${this.transform.scale})`;
+      this.percentLabel.textContent = `${Math.round(this.transform.scale * 100)}%`;
+    }
     this.viewport.classList.toggle(
       "mermaid--active",
       this.mode === "custom",
@@ -394,10 +420,16 @@ class MermaidZoom {
   }
 
   private save(): void {
-    viewRegistry.set(this.key, { ...this.transform, mode: this.mode });
+    viewRegistry.set(this.key, {
+      ...this.transform,
+      mode: this.mode,
+      ...(this.mode === "inline" && this.inlineReturn
+        ? { returnMode: this.inlineReturn.mode }
+        : {}),
+    });
   }
 
-  private applyTransform(next: ZoomTransform, mode: ViewMode): void {
+  private applyTransform(next: ZoomTransform, mode: EnhancedMode): void {
     this.transform = clampTranslation(next, this.natural, this.size);
     this.mode = mode;
     this.paintTransform();
@@ -405,6 +437,14 @@ class MermaidZoom {
   }
 
   private restore(saved: SavedView): void {
+    if (saved.mode === "inline") {
+      this.enterInline({
+        mode: saved.returnMode ?? "fit-width",
+        transform: { scale: saved.scale, x: saved.x, y: saved.y },
+      });
+      return;
+    }
+
     if (saved.mode === "fit-width") {
       this.fitWidth();
     } else if (saved.mode === "fit-whole") {
@@ -415,6 +455,81 @@ class MermaidZoom {
         "custom",
       );
     }
+  }
+
+  private updateViewportA11y(): void {
+    this.viewport.setAttribute("role", "group");
+    if (this.mode === "inline") {
+      this.viewport.removeAttribute("tabindex");
+      this.viewport.setAttribute(
+        "aria-label",
+        "Mermaid diagram shown inline. Use the toolbar to show zoom controls.",
+      );
+    } else {
+      this.viewport.tabIndex = 0;
+      this.viewport.setAttribute(
+        "aria-label",
+        "Mermaid diagram. Use plus and minus to zoom and arrow keys to pan.",
+      );
+    }
+  }
+
+  private updateInlineButton(): void {
+    const inline = this.mode === "inline";
+    const label = inline ? "Show zoom controls" : "Show diagram inline";
+    this.inlineButton.setAttribute("aria-pressed", String(inline));
+    this.inlineButton.setAttribute("aria-label", label);
+    this.inlineButton.title = label;
+  }
+
+  private toggleInline(): void {
+    if (this.overlay) return;
+    if (this.mode === "inline") this.exitInline();
+    else this.enterInline();
+  }
+
+  private enterInline(
+    returnView?: { mode: EnhancedMode; transform: ZoomTransform },
+  ): void {
+    if (this.mode === "inline") return;
+
+    const previous = returnView ?? {
+      mode: this.mode,
+      transform: { ...this.transform },
+    };
+    this.inlineReturn = {
+      mode: previous.mode,
+      transform: { ...previous.transform },
+    };
+    this.transform = { ...previous.transform };
+    this.mode = "inline";
+
+    this.viewport.classList.add("mermaid--inline");
+    this.viewport.classList.remove("mermaid--active");
+    this.viewport.style.height = "";
+    this.updateInlineButton();
+    this.updateViewportA11y();
+    this.save();
+  }
+
+  private exitInline(): void {
+    if (this.mode !== "inline") return;
+
+    const target = this.inlineReturn ?? {
+      mode: "fit-width" as const,
+      transform: { scale: 1, x: 0, y: 0 },
+    };
+    this.inlineReturn = null;
+    this.viewport.classList.remove("mermaid--inline");
+
+    this.size = this.measure(this.viewport);
+    if (this.size.width > 0) {
+      this.applyFittedHeight(this.size.width);
+      this.size = this.measure(this.viewport);
+    }
+    this.restore({ ...target.transform, mode: target.mode });
+    this.updateInlineButton();
+    this.updateViewportA11y();
   }
 
   private fitWidth(): void {
@@ -464,6 +579,7 @@ class MermaidZoom {
   }
 
   private onWheel = (event: WheelEvent): void => {
+    if (this.mode === "inline") return;
     if (!(event.ctrlKey || event.metaKey)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -477,6 +593,7 @@ class MermaidZoom {
   };
 
   private onPointerDown = (event: PointerEvent): void => {
+    if (this.mode === "inline") return;
     if (event.button !== 0 || event.isPrimary === false) return;
     if (isToolbarTarget(event.target)) return;
 
@@ -559,12 +676,14 @@ class MermaidZoom {
   };
 
   private onDoubleClick = (event: MouseEvent): void => {
+    if (this.mode === "inline") return;
     if (isToolbarTarget(event.target)) return;
     event.preventDefault();
     this.fitWhole();
   };
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (this.mode === "inline" || isToolbarTarget(event.target)) return;
     const step = event.shiftKey ? FAST_PAN_STEP : PAN_STEP;
 
     switch (event.key) {
@@ -599,6 +718,8 @@ class MermaidZoom {
   };
 
   private onResize(): void {
+    if (this.mode === "inline") return;
+
     const size = this.measure(this.viewport);
     if (size.width === this.size.width && size.height === this.size.height) {
       return;
@@ -619,6 +740,7 @@ class MermaidZoom {
   }
 
   private toggleFullscreen(): void {
+    if (this.mode === "inline") return;
     if (this.overlay) this.closeFullscreen();
     else this.openFullscreen();
   }
