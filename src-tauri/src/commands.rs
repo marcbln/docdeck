@@ -128,15 +128,17 @@ fn entry_for(path: &Path) -> Option<InboxEntry> {
 #[tauri::command]
 pub fn load_file(path_str: String, watcher: State<WatcherState>) -> Result<FilePayload, String> {
     let path = PathBuf::from(&path_str);
-    let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve path: {e}"))?;
 
-    let content = fs::read_to_string(&canonical).map_err(|e| e.to_string())?;
-    let metadata = fs::metadata(&canonical).map_err(|e| e.to_string())?;
+    let content = fs::read_to_string(&canonical).map_err(|e| format!("cannot read file: {e}"))?;
+    let metadata = fs::metadata(&canonical).map_err(|e| format!("cannot stat file: {e}"))?;
     let modified_time = metadata
         .modified()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("cannot read modification time: {e}"))?
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("invalid modification time: {e}"))?
         .as_millis() as u64;
 
     let filename = canonical
@@ -145,7 +147,9 @@ pub fn load_file(path_str: String, watcher: State<WatcherState>) -> Result<FileP
         .unwrap_or_else(|| path_str.clone());
 
     // Register with the debounced watcher so external writes are picked up.
-    watcher.watch_file(&canonical)?;
+    watcher
+        .watch_file(&canonical)
+        .map_err(|e| format!("cannot watch file: {e}"))?;
 
     Ok(FilePayload {
         path: canonical.to_string_lossy().to_string(),

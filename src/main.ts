@@ -386,9 +386,10 @@ class AppState {
       this.setActiveTab(data.path);
     } catch (error) {
       console.error(`Failed to load file: ${rawPath}`, error);
-      // A row can lose the race against a delete; that is routine, not an
-      // error worth interrupting the reader for.
-      this.showMessage(`Could not open ${rawPath}`);
+      // Surface the backend reason: a watcher-limit or permission failure is
+      // otherwise indistinguishable from a file that no longer exists.
+      const reason = error instanceof Error ? error.message : String(error);
+      this.showMessage(`Could not open ${rawPath}: ${reason}`);
     }
   }
 
