@@ -38,6 +38,10 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   docdeck attached for debugging; debug builds never detach.
 - **GitHub-flavoured Markdown** — tables, task lists (`- [x]`), syntax-highlighted
   code blocks and Mermaid diagrams, with scroll position preserved across reloads.
+- **Safe links** — clicking a link never replaces the app window. Web links and
+  `mailto:` open in the OS default handler, local Markdown links open or focus a
+  tab (scrolling to any `#fragment`), other local files open in their default
+  application, and `javascript:`/`data:`/unknown schemes are blocked with a toast.
 - **Copy code** — hover any code block for a button that puts its plain source on
   the clipboard and confirms with a checkmark. Diagrams are skipped.
 - **Diagram zoom & pan** — large Mermaid graphs open at fit-width and can be

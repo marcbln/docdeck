@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- Clicking a link in a rendered document no longer navigates docdeck's webview
+  away from the app and forces a restart. Web links open in the system browser,
+  local Markdown links open as tabs, other local files open in their default
+  app, and unsafe schemes are blocked with a toast.
 - Inbox rendering no longer rebuilds every row on tab activation or on each
   watcher event. The inbox now paints only the visible rows from a recycled
   pool, so switching tabs with thousands of watched documents stays
