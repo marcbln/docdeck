@@ -6,6 +6,7 @@ import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
 import { InboxModel, type InboxSeed } from "./inbox-model";
 import { InboxPanel, type InboxStatus, type ScanProgress } from "./inbox-panel";
+import { classifyLink, isMarkdownPath, type ResolvedLink } from "./links";
 import {
   applyMermaidTheme,
   isTailing,
@@ -21,6 +22,7 @@ import {
   type ThemeMode,
 } from "./preferences";
 import { fileName, isUnderAny } from "./project";
+import { scrollToAnchor } from "./scroll";
 import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
 import { extractHeadings } from "./toc";
@@ -94,6 +96,10 @@ function must<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing required element: #${id}`);
   return el as T;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 class AppState {
@@ -187,13 +193,14 @@ class AppState {
 
     this.inboxPanel = new InboxPanel(this.inboxPanelEl, {
       onOpen: (path) => {
-        if (this.tabs.has(path)) this.setActiveTab(path);
+        if (this.tabs.has(path)) void this.setActiveTab(path);
         else void this.openDocument(path);
       },
     });
 
     this.applyPreferencesToUi();
     this.bindControls();
+    this.bindLinkHandling();
     this.theme.apply(this.preferences.themeMode);
     this.renderInbox();
     void this.start();
@@ -318,6 +325,81 @@ class AppState {
     });
   }
 
+  /**
+   * Dispatches every document link instead of letting the webview navigate.
+   *
+   * Bound to `body` so it also covers anchors in the Mermaid fullscreen
+   * overlay, which is moved outside the viewer. Controls that already handle
+   * their own clicks (for example TOC links) call `preventDefault()` first and
+   * are skipped by the `defaultPrevented` check.
+   */
+  private bindLinkHandling(): void {
+    const activate = (event: MouseEvent): void => {
+      if (event.defaultPrevented || event.button === 2) return;
+
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor) return;
+
+      event.preventDefault();
+      void this.handleLink(anchor.getAttribute("href") ?? "");
+    };
+
+    // `click` covers the primary button; `auxclick` covers middle-click in
+    // WebKitGTK. Both follow the same rules: never navigate.
+    document.body.addEventListener("click", activate);
+    document.body.addEventListener("auxclick", activate);
+  }
+
+  private async handleLink(rawHref: string): Promise<void> {
+    const target = classifyLink(rawHref);
+
+    switch (target.kind) {
+      case "empty":
+        return;
+      case "fragment":
+        scrollToAnchor(this.contentContainer, target.fragment);
+        return;
+      case "blocked":
+        this.toast.show(`Blocked link: ${target.reason}`, "error");
+        return;
+      case "external":
+      case "mailto":
+        try {
+          await invoke("open_external_url", { url: target.url });
+        } catch (error) {
+          this.toast.show(
+            `Could not open link: ${describeError(error)}`,
+            "error",
+          );
+        }
+        return;
+      case "local": {
+        // Capture the document the link was authored in: the resolver must
+        // use its directory even if the active tab changes mid-flight.
+        const baseFile = this.activePath;
+        if (baseFile === null) return;
+
+        try {
+          const resolved = await invoke<ResolvedLink>("resolve_document_link", {
+            baseFile,
+            href: target.path,
+          });
+
+          if (!resolved.isDir && isMarkdownPath(resolved.path)) {
+            await this.openDocument(resolved.path, target.fragment);
+          } else {
+            await invoke("open_local_path", { path: resolved.path });
+          }
+        } catch (error) {
+          this.toast.show(describeError(error), "error");
+        }
+        return;
+      }
+    }
+  }
+
   private async bindBackend(): Promise<void> {
     try {
       // A second `docdeck <path>` in another shell. Folders join the session
@@ -362,7 +444,10 @@ class AppState {
 
   // -- document lifecycle ---------------------------------------------------
 
-  public async openDocument(rawPath: string): Promise<void> {
+  public async openDocument(
+    rawPath: string,
+    fragment: string | null = null,
+  ): Promise<void> {
     try {
       const data = await invoke<FilePayload>("load_file", { pathStr: rawPath });
 
@@ -383,7 +468,8 @@ class AppState {
         });
       }
 
-      this.setActiveTab(data.path);
+      await this.setActiveTab(data.path);
+      if (fragment !== null) scrollToAnchor(this.contentContainer, fragment);
     } catch (error) {
       console.error(`Failed to load file: ${rawPath}`, error);
       // Surface the backend reason: a watcher-limit or permission failure is
@@ -492,7 +578,7 @@ class AppState {
     }, 2500);
   }
 
-  public setActiveTab(path: string): void {
+  public async setActiveTab(path: string): Promise<void> {
     const previous = this.activePath;
     this.activePath = path;
     const tab = this.tabs.get(path);
@@ -508,7 +594,7 @@ class AppState {
     this.inboxPanel.setActive(previous, path, this.inbox.unreadCount());
 
     this.renderTabs();
-    void this.renderActiveContent();
+    await this.renderActiveContent();
   }
 
   private async closeTabPath(path: string): Promise<void> {
@@ -640,7 +726,7 @@ class AppState {
       item.title = tab.deletedOnDisk
         ? `${tab.path} (deleted on disk)`
         : tab.path;
-      item.addEventListener("click", () => this.setActiveTab(tab.path));
+      item.addEventListener("click", () => void this.setActiveTab(tab.path));
       item.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         // A keyboard-opened menu may be followed by the webview's own
@@ -655,7 +741,7 @@ class AppState {
       item.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          this.setActiveTab(tab.path);
+          void this.setActiveTab(tab.path);
           return;
         }
         if (

@@ -1,11 +1,9 @@
 import type { Heading } from "./toc";
+import { scrollToAnchor, SCROLL_OFFSET_PX } from "./scroll";
 
 /** Id of the metadata table the pinned TOC entry jumps to. */
 const METADATA_ANCHOR_ID = "doc-metadata";
 const METADATA_LABEL = "Document metadata";
-
-/** Offset in px used when jumping to a heading, clearing the sticky header. */
-const SCROLL_OFFSET_PX = 12;
 
 export interface TocPanelOptions {
   /** The <nav> that lists the outline. */
@@ -89,16 +87,7 @@ export class TocPanel {
   }
 
   private scrollTo(slug: string): void {
-    const target = document.getElementById(slug);
-    if (!target) return;
-
-    const top =
-      target.getBoundingClientRect().top -
-      this.options.scrollParent.getBoundingClientRect().top +
-      this.options.scrollParent.scrollTop -
-      SCROLL_OFFSET_PX;
-    this.options.scrollParent.scrollTo({ top, behavior: "smooth" });
-    this.setActive(slug);
+    if (scrollToAnchor(this.options.scrollParent, slug)) this.setActive(slug);
   }
 
   private observe(): void {
