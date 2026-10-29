@@ -124,6 +124,30 @@ pub fn is_markdown(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
 }
 
+/// Resolves a document-relative link against the directory of `base_file`.
+///
+/// The caller supplies an already percent-decoded target. Canonicalization
+/// normalizes `..` segments and proves the target exists.
+pub fn resolve_link(base_file: &Path, raw: &str) -> Result<PathBuf, String> {
+    if raw.is_empty() {
+        return Err("empty link target".to_string());
+    }
+
+    let candidate = Path::new(raw);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        let parent = base_file
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", base_file.display()))?;
+        parent.join(candidate)
+    };
+
+    joined
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", joined.display()))
+}
+
 /// Whether `path` lies inside `root` (or is `root` itself).
 ///
 /// `Path::starts_with` compares whole components, so `/tmp/ab` is correctly

@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod detach;
 mod folder;
+mod navigation;
 mod paths;
 mod render;
 mod watcher;
@@ -12,6 +13,8 @@ mod watcher;
 mod config_test;
 #[cfg(test)]
 mod folder_test;
+#[cfg(test)]
+mod navigation_test;
 #[cfg(test)]
 mod paths_test;
 #[cfg(test)]
@@ -36,6 +39,14 @@ use watcher::WatcherState;
 fn startup_paths() -> Vec<CliEntry> {
     let cwd = env::current_dir().unwrap_or_default();
     paths::classify_args(&env::args().collect::<Vec<_>>(), &cwd)
+}
+
+/// Cancels every webview navigation that leaves docdeck's own origin.
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let dev = tauri::is_dev();
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(move |_webview, url| navigation::allows_navigation(url, dev))
+        .build()
 }
 
 pub fn run() {
@@ -66,6 +77,8 @@ pub fn run() {
         }
     }));
 
+    builder = builder.plugin(navigation_guard());
+
     builder
         .manage(watcher_state)
         .setup(|app| {
@@ -79,6 +92,9 @@ pub fn run() {
             commands::close_file,
             commands::load_watches,
             commands::add_watch,
+            commands::open_external_url,
+            commands::open_local_path,
+            commands::resolve_document_link,
             startup_paths
         ])
         .run(tauri::generate_context!())

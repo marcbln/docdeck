@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::{open_path, open_url};
 
 use crate::config::{self, Limits, MAX_FILES};
 use crate::folder::{self, MAX_SCAN_ENTRIES};
@@ -156,6 +157,51 @@ pub fn load_file(path_str: String, watcher: State<WatcherState>) -> Result<FileP
         filename,
         content,
         modified_time,
+    })
+}
+
+/// Result of resolving a relative link against the active document.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedLink {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Opens an external URL with the OS default handler.
+///
+/// The frontend has already classified the link; re-checking the scheme here
+/// keeps this command from becoming a general-purpose opener if the webview is
+/// ever compromised.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = tauri::Url::parse(&url).map_err(|error| format!("invalid URL: {error}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => {}
+        scheme => return Err(format!("blocked URL scheme: {scheme}")),
+    }
+
+    open_url(url, None::<&str>).map_err(|error| format!("cannot open URL: {error}"))
+}
+
+/// Opens an existing local file or directory with its default application.
+#[tauri::command]
+pub fn open_local_path(path: String) -> Result<(), String> {
+    let canonical = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve path: {error}"))?;
+
+    open_path(canonical, None::<&str>).map_err(|error| format!("cannot open path: {error}"))
+}
+
+/// Resolves a document-relative link to a canonical absolute path.
+#[tauri::command]
+pub fn resolve_document_link(base_file: String, href: String) -> Result<ResolvedLink, String> {
+    let resolved = crate::paths::resolve_link(Path::new(&base_file), &href)?;
+
+    Ok(ResolvedLink {
+        is_dir: resolved.is_dir(),
+        path: resolved.to_string_lossy().into_owned(),
     })
 }
 

@@ -2,7 +2,7 @@
 mod tests {
     use crate::paths::{
         classify_args, expand_tilde, has_ignored_component_below, is_ignored_name, is_markdown,
-        is_noise_name, is_relevant, is_under, modified_millis, ExcludeSet,
+        is_noise_name, is_relevant, is_under, modified_millis, resolve_link, ExcludeSet,
     };
     use std::collections::HashSet;
     use std::fs;
@@ -225,5 +225,43 @@ mod tests {
         // ...not against whatever directory the running app happens to have.
         let elsewhere = tempdir().unwrap();
         assert!(classify_args(&argv, elsewhere.path()).is_empty());
+    }
+
+    #[test]
+    fn links_resolve_against_the_document_directory() {
+        let dir = tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let base = docs.join("plan.md");
+        fs::write(&base, "# plan").unwrap();
+        let sibling = docs.join("notes.md");
+        fs::write(&sibling, "# notes").unwrap();
+        let assets = dir.path().join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let asset = assets.join("diagram.png");
+        fs::write(&asset, "png").unwrap();
+
+        assert_eq!(
+            resolve_link(&base, "notes.md").unwrap(),
+            sibling.canonicalize().unwrap()
+        );
+        assert_eq!(
+            resolve_link(&base, "../assets/diagram.png").unwrap(),
+            asset.canonicalize().unwrap()
+        );
+        assert_eq!(
+            resolve_link(&base, &asset.to_string_lossy()).unwrap(),
+            asset.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn missing_and_empty_link_targets_are_rejected() {
+        let dir = tempdir().unwrap();
+        let base = dir.path().join("plan.md");
+        fs::write(&base, "# plan").unwrap();
+
+        assert!(resolve_link(&base, "missing.md").is_err());
+        assert!(resolve_link(&base, "").is_err());
     }
 }
