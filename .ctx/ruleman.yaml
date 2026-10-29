@@ -1,0 +1,11 @@
+project_id: docdeck
+technologies:
+  bash: {}
+  nodejs: {}
+  rust: {}
+  tauri: {}
+  typescript: {}
+  vite: {}
+export:
+  format: markdown
+  path: _ai/conventions.md
