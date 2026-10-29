@@ -3,7 +3,8 @@ filename: "_ai/backlog/active/261029_1301__IMPLEMENTATION_PLAN__block-webview-na
 title: "Block webview navigation and handle document links safely"
 createdAt: 2026-10-29 13:01
 updatedAt: 2026-10-29 13:01
-status: draft
+status: completed
+completedAt: 2026-10-29 13:38
 priority: high
 tags: [webview, navigation, links, security, tauri, bugfix]
 estimatedComplexity: moderate
@@ -973,6 +974,7 @@ planFile: "_ai/backlog/active/261029_1301__IMPLEMENTATION_PLAN__block-webview-na
 specFile: ""
 project: "docdeck"
 status: completed
+completedAt: 2026-10-29 13:38
 filesCreated: 0
 filesModified: 0
 filesDeleted: 0
