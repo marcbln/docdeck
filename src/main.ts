@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
 import { copyText } from "./copy-code";
 import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
@@ -104,6 +105,8 @@ function describeError(error: unknown): string {
 
 class AppState {
   private readonly tabs = new Map<string, Tab>();
+  /** Recently closed tab paths, most recent last. */
+  private readonly closedTabs = new ClosedTabs();
   private activePath: string | null = null;
   /** Path whose markup is painted; null while the empty state is showing. */
   private renderedPath: string | null = null;
@@ -201,6 +204,7 @@ class AppState {
     this.applyPreferencesToUi();
     this.bindControls();
     this.bindLinkHandling();
+    this.bindShortcuts();
     this.theme.apply(this.preferences.themeMode);
     this.renderInbox();
     void this.start();
@@ -322,6 +326,16 @@ class AppState {
         this.theme.apply(mode);
         this.persist();
       },
+    });
+  }
+
+  /** Reopens the most recently closed tab, like a browser's Ctrl+Shift+T. */
+  private bindShortcuts(): void {
+    window.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return;
+      if (!isReopenClosedTabShortcut(event)) return;
+      event.preventDefault();
+      void this.reopenClosedTab();
     });
   }
 
@@ -447,9 +461,12 @@ class AppState {
   public async openDocument(
     rawPath: string,
     fragment: string | null = null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const data = await invoke<FilePayload>("load_file", { pathStr: rawPath });
+
+      // Opening a closed path manually makes its history entry stale.
+      this.closedTabs.forget(data.path);
 
       const existing = this.tabs.get(data.path);
       if (existing) {
@@ -484,13 +501,32 @@ class AppState {
 
       await this.setActiveTab(data.path);
       if (fragment !== null) scrollToAnchor(this.contentContainer, fragment);
+      return true;
     } catch (error) {
       console.error(`Failed to load file: ${rawPath}`, error);
       // Surface the backend reason: a watcher-limit or permission failure is
       // otherwise indistinguishable from a file that no longer exists.
       const reason = error instanceof Error ? error.message : String(error);
       this.showMessage(`Could not open ${rawPath}: ${reason}`);
+      return false;
     }
+  }
+
+  /**
+   * Pops the closed-tab stack and opens that document again. The history entry
+   * is consumed even when the file can no longer be read, so the next press
+   * moves to the document before it instead of retrying the same failure.
+   */
+  private async reopenClosedTab(): Promise<void> {
+    const path = this.closedTabs.take();
+    if (path === undefined) return;
+
+    if (this.tabs.has(path)) {
+      await this.setActiveTab(path);
+      return;
+    }
+
+    await this.openDocument(path);
   }
 
   /**
@@ -623,6 +659,7 @@ class AppState {
       console.error(`Failed to release watch for ${path}`, error);
     }
 
+    if (this.tabs.has(path)) this.closedTabs.record(path);
     this.tabs.delete(path);
     this.reloadTokens.delete(path);
 

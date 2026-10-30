@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Reopen closed tabs with `Ctrl+Shift+T` (`Cmd+Shift+T` on macOS), browser
+  style. The session keeps the 25 most recently closed documents and repeated
+  presses walk back through them; reopening a path manually clears its stale
+  history entry.
 - The Inbox now defaults to two focused sections — **Change detected** (unread
   changes and deleted files) and **Manually opened** (open tabs) — instead of
   listing every matched path. The complete inventory moved behind an

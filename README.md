@@ -33,6 +33,10 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Copy a tab's path** — right-click any tab (or press `Shift+F10` / the
   ContextMenu key) to copy the document's absolute path. Hovering a tab shows
   the same path as a tooltip, and a short toast confirms the copy.
+- **Reopen closed tabs** — `Ctrl+Shift+T` (`Cmd+Shift+T` on macOS) reopens the
+  most recently closed document, browser-style. Repeated presses walk back
+  through the session's closed tabs; documents deleted in the meantime are
+  skipped after reporting the read error.
 - **Single-instance CLI** — running `docdeck <file>` or `docdeck <folder>` from any
   terminal reaches the *running* window instead of starting a second process.
 - **Survives the terminal** — release builds launched from a shell detach into
@@ -197,6 +201,7 @@ surface.
 | Click a row | Open the document (like clicking its tab) |
 | Click a tab | Activate it and clear its unread dot |
 | `×` on a tab | Close it and release its file watch (watched folders stay live) |
+| `Ctrl+Shift+T` / `Cmd+Shift+T` | Reopen the most recently closed tab |
 
 ### Preferences
 
@@ -241,6 +246,7 @@ src/                  Frontend — tab state, layout, markdown rendering
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
   tab-menu.ts         Right-click menu for tabs: positioning, dismissal, focus
+  closed-tabs.ts      Session stack of closed paths and the reopen shortcut
   theme.ts            Stylesheet swap, Catppuccin Latte, mermaid theming
   toast.ts            Transient themed status messages
   metadata-table.ts   Frontmatter <details> table view
