@@ -21,6 +21,45 @@ export interface InboxSeed {
   modifiedTime: number;
 }
 
+/** The two default inbox sections, already newest-first. */
+export interface InboxSections {
+  /** Unread changes and files deleted since startup. */
+  changed: InboxEntry[];
+  /** Open tabs that are not already listed as changed. */
+  opened: InboxEntry[];
+}
+
+/**
+ * Splits sorted entries into the two sections the panel shows by default.
+ *
+ * A file can be both changed and open. It stays in `changed` only while the
+ * change is unacknowledged (unread or deleted) so sections never duplicate a
+ * row; reading it moves it to `opened`.
+ */
+export function sectionInbox(
+  entries: readonly InboxEntry[],
+  openPaths: ReadonlySet<string>,
+): InboxSections {
+  const changed: InboxEntry[] = [];
+  const opened: InboxEntry[] = [];
+  const changedPaths = new Set<string>();
+
+  for (const entry of entries) {
+    if (entry.unread || entry.deleted) {
+      changed.push(entry);
+      changedPaths.add(entry.path);
+    }
+  }
+
+  for (const entry of entries) {
+    if (openPaths.has(entry.path) && !changedPaths.has(entry.path)) {
+      opened.push(entry);
+    }
+  }
+
+  return { changed, opened };
+}
+
 export class InboxModel {
   private readonly entries = new Map<string, InboxEntry>();
 

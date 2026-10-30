@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The Inbox now defaults to two focused sections — **Change detected** (unread
+  changes and deleted files) and **Manually opened** (open tabs) — instead of
+  listing every matched path. The complete inventory moved behind an
+  **All files (N)** button that opens a windowed modal, so configurations with
+  thousands of watched files stay out of the panel.
 - Mermaid diagrams can switch per diagram between the zoom panel and normal
   in-document flow (natural aspect, capped at the column width, page scrollbar)
   from a new toolbar button. The choice survives live reloads and remembers the

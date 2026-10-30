@@ -468,6 +468,20 @@ class AppState {
         });
       }
 
+      // A manually opened document joins the session inventory even when it is
+      // outside every watch root, so it can appear under "Manually opened" and
+      // in the All-files modal. It is never marked unread: the reader is
+      // opening it right now.
+      this.inbox.upsert(
+        {
+          path: data.path,
+          filename: data.filename,
+          modifiedTime: data.modified_time,
+        },
+        false,
+      );
+      this.renderInbox();
+
       await this.setActiveTab(data.path);
       if (fragment !== null) scrollToAnchor(this.contentContainer, fragment);
     } catch (error) {
@@ -590,8 +604,13 @@ class AppState {
       this.activeUpdatePath = null;
     }
 
-    this.inbox.markRead(path);
-    this.inboxPanel.setActive(previous, path, this.inbox.unreadCount());
+    const becameRead = this.inbox.markRead(path);
+    if (becameRead) {
+      // The row moves from "Change detected" to "Manually opened".
+      this.renderInbox();
+    } else {
+      this.inboxPanel.setActive(previous, path);
+    }
 
     this.renderTabs();
     await this.renderActiveContent();
@@ -648,6 +667,18 @@ class AppState {
       const result = await invoke<WatchLoad>("load_watches");
       for (const root of result.roots) this.watchRoots.add(root);
       this.inbox.replace(result.entries.map(toSeed));
+      // Explicit CLI documents are opened before the config scan. `replace`
+      // clears the inventory, so put those session rows back afterwards.
+      for (const tab of this.tabs.values()) {
+        this.inbox.upsert(
+          {
+            path: tab.path,
+            filename: tab.filename,
+            modifiedTime: tab.modifiedTime,
+          },
+          false,
+        );
+      }
       this.inboxStatus = {
         configPath: result.configPath,
         configFound: result.configFound,

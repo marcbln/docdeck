@@ -1039,13 +1039,68 @@ body {
 
 .inbox-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   padding: 4px 12px 8px;
   color: var(--text-muted);
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.inbox-title {
+  flex: 0 0 auto;
+}
+
+.inbox-count {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-browse {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.inbox-browse:hover,
+.inbox-browse:focus-visible {
+  color: var(--accent-color);
+}
+
+.inbox-browse:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.inbox-section + .inbox-section {
+  margin-top: 8px;
+}
+
+.inbox-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 12px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.inbox-section-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .inbox-list {
@@ -1056,7 +1111,7 @@ body {
 }
 
 .inbox-row {
-  position: absolute;
+  position: relative;
   left: 0;
   right: 0;
   padding: 6px 12px;
@@ -1064,6 +1119,10 @@ body {
   cursor: pointer;
   overflow: hidden;
   transition: background 0.15s ease-in-out;
+}
+
+.inbox-list--virtual .inbox-row {
+  position: absolute;
 }
 
 .inbox-row:hover {
@@ -1189,6 +1248,74 @@ body {
 .inbox-warnings ul {
   margin: 6px 0 0;
   padding-left: 16px;
+}
+
+/* All-files modal — the complete inventory, windowed to the visible rows. */
+
+.inbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.6);
+}
+
+.inbox-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  height: min(80vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-secondary);
+}
+
+.inbox-modal-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inbox-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inbox-modal-count {
+  flex: 1 1 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.inbox-modal-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inbox-modal-close:hover,
+.inbox-modal-close:focus-visible {
+  color: var(--accent-color);
+}
+
+.inbox-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* --------------------------------------------------------------------------

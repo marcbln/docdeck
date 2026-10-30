@@ -47,7 +47,7 @@ function status(overrides: Partial<InboxStatus> = {}): InboxStatus {
 }
 
 function mount(
-  entries: InboxEntry[] = [entry()],
+  all: InboxEntry[] = [entry({ unread: true })],
   onOpen = vi.fn(),
 ): {
   root: HTMLElement;
@@ -59,42 +59,43 @@ function mount(
   const panel = new InboxPanel(root, {
     onOpen,
     now: () => NOW,
-    viewportHeight: VIEWPORT,
+    modalViewportHeight: VIEWPORT,
   });
-  panel.render(entries, status(), new Set(), null);
+  panel.render(all, status(), new Set(), null);
   return { root, panel, onOpen };
 }
 
 function render(
-  entries: InboxEntry[],
-  panelStatus: InboxStatus,
+  all: InboxEntry[],
+  panelStatus: InboxStatus = status(),
   openPaths: Set<string> = new Set(),
   activePath: string | null = null,
   onOpen = vi.fn(),
 ): HTMLElement {
-  document.body.innerHTML = '<aside id="inbox-panel"></aside>';
-  const root = document.getElementById("inbox-panel") as HTMLElement;
-  new InboxPanel(root, {
-    onOpen,
-    now: () => NOW,
-    viewportHeight: VIEWPORT,
-  }).render(entries, panelStatus, openPaths, activePath);
-  return root;
+  const mounted = mount(all, onOpen);
+  mounted.panel.render(all, panelStatus, openPaths, activePath);
+  return mounted.root;
 }
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-function rowPaths(root: HTMLElement): string[] {
+function rowPaths(root: ParentNode): string[] {
   return [...root.querySelectorAll<HTMLElement>(".inbox-row")].map(
     (row) => row.dataset.path ?? "",
   );
 }
 
+function sectionNames(root: HTMLElement): string[] {
+  return [
+    ...root.querySelectorAll<HTMLElement>(".inbox-section"),
+  ].map((section) => section.dataset.section ?? "");
+}
+
 describe("InboxPanel", () => {
   it("renders the row anatomy: project chip, filename, parent, relative time", () => {
-    const root = mount().root;
+    const { root } = mount();
 
     expect(root.querySelector(".inbox-project")?.textContent).toBe("docdeck");
     expect(root.querySelector(".inbox-filename")?.textContent).toBe("plan.md");
@@ -104,49 +105,88 @@ describe("InboxPanel", () => {
     expect(root.querySelector(".inbox-time")?.textContent).toBe("1m ago");
   });
 
-  it("renders rows in the order given and counts unread files", () => {
+  it("shows changed and opened sections without duplicating a row", () => {
+    const all = [
+      entry({ path: "/a/changed.md", filename: "changed.md", unread: true }),
+      entry({ path: "/a/opened.md", filename: "opened.md" }),
+      entry({ path: "/a/both.md", filename: "both.md", unread: true }),
+      entry({ path: "/a/hidden.md", filename: "hidden.md" }),
+    ];
     const root = render(
-      [
-        entry({ path: "/a/old.md", filename: "old.md", modifiedTime: NOW - 90_000 }),
-        entry({ path: "/a/new.md", filename: "new.md", modifiedTime: NOW - 60_000, unread: true }),
-      ],
+      all,
       status(),
+      new Set(["/a/opened.md", "/a/both.md"]),
     );
 
-    const names = [...root.querySelectorAll(".inbox-filename")].map((node) => node.textContent);
-    expect(names).toEqual(["old.md", "new.md"]);
-    expect(root.querySelector(".inbox-count")?.textContent).toBe("2 files · 1 new");
-    expect(root.querySelectorAll(".inbox-row.unread").length).toBe(1);
+    expect(sectionNames(root)).toEqual(["change-detected", "opened"]);
+    expect(
+      [...root.querySelectorAll("[data-section='change-detected'] .inbox-filename")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["changed.md", "both.md"]);
+    expect(
+      [...root.querySelectorAll("[data-section='opened'] .inbox-filename")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["opened.md"]);
+    expect(root.querySelector(".inbox-count")?.textContent).toBe(
+      "2 changed · 1 open",
+    );
+    expect(root.querySelector(".inbox-browse")?.textContent).toBe("All files (4)");
+  });
+
+  it("treats deleted files as changes", () => {
+    const root = render([entry({ deleted: true })], status());
+
+    expect(sectionNames(root)).toEqual(["change-detected"]);
+    expect(root.querySelector(".inbox-row")?.classList.contains("deleted")).toBe(
+      true,
+    );
+  });
+
+  it("hides unchanged watched files behind the All-files modal", () => {
+    const root = render(entries(4), status());
+
+    expect(root.querySelectorAll(".inbox-row").length).toBe(0);
+    expect(root.querySelector(".inbox-empty")?.textContent).toContain(
+      "No changes or open documents",
+    );
+    expect(root.querySelector(".inbox-browse")?.textContent).toBe("All files (4)");
   });
 
   it("marks open and active rows", () => {
     const path = "/home/u/devel/docdeck/_ai/backlog/plan.md";
     const root = render([entry()], status(), new Set([path]), path);
 
-    expect(root.querySelector(".inbox-row")?.classList.contains("open")).toBe(true);
-    expect(root.querySelector(".inbox-row")?.classList.contains("active")).toBe(true);
-  });
-
-  it("marks deleted rows", () => {
-    const root = render([entry({ deleted: true })], status());
-    expect(root.querySelector(".inbox-row")?.classList.contains("deleted")).toBe(true);
+    expect(root.querySelector(".inbox-row")?.classList.contains("open")).toBe(
+      true,
+    );
+    expect(root.querySelector(".inbox-row")?.classList.contains("active")).toBe(
+      true,
+    );
   });
 
   it("opens on click and on Enter", () => {
     const onOpen = vi.fn();
-    const root = render([entry()], status(), new Set(), null, onOpen);
+    const root = render([entry({ unread: true })], status(), new Set(), null, onOpen);
     const row = root.querySelector(".inbox-row") as HTMLElement;
 
     row.click();
-    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    row.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
 
     expect(onOpen).toHaveBeenCalledTimes(2);
-    expect(onOpen).toHaveBeenCalledWith("/home/u/devel/docdeck/_ai/backlog/plan.md");
+    expect(onOpen).toHaveBeenCalledWith(
+      "/home/u/devel/docdeck/_ai/backlog/plan.md",
+    );
   });
 
   it("shows a loading line before the scan resolves", () => {
     const root = render([], status({ loading: true }));
-    expect(root.querySelector(".inbox-loading")?.textContent).toContain("Scanning");
+    expect(root.querySelector(".inbox-loading")?.textContent).toContain(
+      "Scanning",
+    );
   });
 
   it("names the path currently being scanned", () => {
@@ -167,7 +207,9 @@ describe("InboxPanel", () => {
 
   it("shows a config parse error", () => {
     const root = render([], status({ error: "config.toml: expected `=`" }));
-    expect(root.querySelector(".inbox-error")?.textContent).toContain("Config error");
+    expect(root.querySelector(".inbox-error")?.textContent).toContain(
+      "Config error",
+    );
   });
 
   it("shows the setup hint with the config path when the file is missing", () => {
@@ -183,7 +225,9 @@ describe("InboxPanel", () => {
       status({ warnings: ["first warning", "second warning"], truncated: true }),
     );
 
-    expect(root.querySelector(".inbox-warnings summary")?.textContent).toBe("2 warnings");
+    expect(root.querySelector(".inbox-warnings summary")?.textContent).toBe(
+      "2 warnings",
+    );
     expect(root.querySelectorAll(".inbox-warnings li").length).toBe(2);
     expect(root.querySelector(".inbox-truncated")).not.toBeNull();
   });
@@ -196,13 +240,15 @@ describe("InboxPanel", () => {
   it("moves the active class without replacing other rows", () => {
     const firstPath = "/a/first.md";
     const secondPath = "/a/second.md";
-    const { root, panel } = mount([
+    const all = [
       entry({ path: firstPath, filename: "first.md" }),
       entry({ path: secondPath, filename: "second.md" }),
-    ]);
+    ];
+    const { root, panel } = mount(all);
+    panel.render(all, status(), new Set([firstPath, secondPath]), null);
     const before = root.querySelectorAll(".inbox-row");
 
-    panel.setActive(null, secondPath, 1);
+    panel.setActive(null, secondPath);
     const after = root.querySelectorAll(".inbox-row");
 
     expect(after[0]).toBe(before[0]);
@@ -213,13 +259,15 @@ describe("InboxPanel", () => {
   it("clears the previous row's active class and marks the new row open", () => {
     const firstPath = "/a/first.md";
     const secondPath = "/a/second.md";
-    const { root, panel } = mount([
+    const all = [
       entry({ path: firstPath, filename: "first.md" }),
       entry({ path: secondPath, filename: "second.md" }),
-    ]);
-    panel.setActive(null, firstPath, 0);
+    ];
+    const { root, panel } = mount(all);
+    panel.render(all, status(), new Set([firstPath, secondPath]), null);
+    panel.setActive(null, firstPath);
 
-    panel.setActive(firstPath, secondPath, 0);
+    panel.setActive(firstPath, secondPath);
     const rows = root.querySelectorAll(".inbox-row");
 
     expect(rows[0].classList.contains("active")).toBe(false);
@@ -227,98 +275,118 @@ describe("InboxPanel", () => {
     expect(rows[1].classList.contains("open")).toBe(true);
   });
 
-  it("removes unread from a newly activated row and updates the header", () => {
+  it("removes the unread marker from a newly activated row", () => {
     const firstPath = "/a/first.md";
     const secondPath = "/a/second.md";
-    const { root, panel } = mount([
+    const all = [
       entry({ path: firstPath, filename: "first.md", unread: true }),
       entry({ path: secondPath, filename: "second.md", unread: true }),
-    ]);
-    expect(root.querySelector(".inbox-count")?.textContent).toBe("2 files · 2 new");
+    ];
+    const { root, panel } = mount(all);
+    panel.render(all, status(), new Set([firstPath, secondPath]), null);
 
-    panel.setActive(null, secondPath, 1);
+    panel.setActive(null, secondPath);
     const rows = root.querySelectorAll(".inbox-row");
 
     expect(rows[1].classList.contains("unread")).toBe(false);
-    expect(root.querySelector(".inbox-count")?.textContent).toBe("2 files · 1 new");
   });
 
   it("replaces only the status host when progress changes", () => {
     const { root, panel } = mount();
     const row = root.querySelector(".inbox-row");
-    const list = root.querySelector(".inbox-list");
+    const sections = root.querySelector(".inbox-sections");
 
     panel.setProgress({ path: "/topdata/shop/_ai", directories: 42, files: 7 });
 
     expect(root.querySelector(".inbox-row")).toBe(row);
-    expect(root.querySelector(".inbox-list")).toBe(list);
-    expect(root.querySelector(".inbox-loading")?.textContent).toContain("/topdata/shop/_ai");
-  });
-
-  it("renders only the visible window of a large inbox", () => {
-    const all = entries(1_000);
-    const { root } = mount(all);
-
-    expect(root.querySelectorAll(".inbox-row").length).toBe(22);
-    expect((root.querySelector(".inbox-list") as HTMLElement).style.height).toBe(
-      "48000px",
+    expect(root.querySelector(".inbox-sections")).toBe(sections);
+    expect(root.querySelector(".inbox-loading")?.textContent).toContain(
+      "/topdata/shop/_ai",
     );
-  });
-
-  it("moves the window on scroll", async () => {
-    const all = entries(1_000);
-    const { root } = mount(all);
-    root.scrollTop = 400 * ROW_HEIGHT;
-
-    root.dispatchEvent(new Event("scroll"));
-    await nextFrame();
-
-    const paths = rowPaths(root);
-    expect(paths[0]).toBe(all[394].path);
-    expect(paths[paths.length - 1]).toBe(all[415].path);
-  });
-
-  it("binds an offscreen row with its active state when it scrolls in", async () => {
-    const all = entries(1_000);
-    const { root, panel } = mount(all);
-
-    panel.setActive(null, all[500].path, 0);
-    expect(root.querySelector(".inbox-row.active")).toBeNull();
-
-    root.scrollTop = 500 * ROW_HEIGHT;
-    root.dispatchEvent(new Event("scroll"));
-    await nextFrame();
-
-    const row = root.querySelector<HTMLElement>(".inbox-row.active");
-    expect(row?.dataset.path).toBe(all[500].path);
-  });
-
-  it("reuses row nodes and re-binds their content on a data render", () => {
-    const all = entries(100);
-    const { root, panel } = mount(all);
-    const before = root.querySelector(".inbox-row");
-
-    const changed = all.map((item, index) =>
-      index === 0 ? { ...item, modifiedTime: NOW - 120_000 } : item,
-    );
-    panel.render(changed, status(), new Set(), null);
-
-    const after = root.querySelector(".inbox-row");
-    expect(after).toBe(before);
-    expect(after?.querySelector(".inbox-time")?.textContent).toBe("2m ago");
-  });
-
-  it("renders no rows for an empty inbox", () => {
-    const { root } = mount([]);
-
-    expect(root.querySelectorAll(".inbox-row").length).toBe(0);
-    expect(root.querySelector(".inbox-empty")).not.toBeNull();
-    expect((root.querySelector(".inbox-list") as HTMLElement).style.height).toBe("0px");
   });
 
   it("releases listeners on destroy", () => {
     const { panel } = mount();
     expect(() => panel.destroy()).not.toThrow();
+  });
+});
+
+describe("InboxBrowser", () => {
+  function openModal(root: HTMLElement): HTMLElement {
+    (root.querySelector(".inbox-browse") as HTMLButtonElement).click();
+    const overlay = document.querySelector<HTMLElement>(".inbox-overlay");
+    if (!overlay) throw new Error("modal did not open");
+    return overlay;
+  }
+
+  it("only shows the complete inventory after clicking the button", () => {
+    const all = entries(1_000);
+    const { root } = mount(all);
+    expect(document.querySelector(".inbox-overlay")).toBeNull();
+
+    const overlay = openModal(root);
+
+    expect(overlay.querySelector(".inbox-modal-title")?.textContent).toBe(
+      "All files",
+    );
+    expect(overlay.querySelector(".inbox-modal-count")?.textContent).toBe(
+      "1000 files",
+    );
+    expect(rowPaths(overlay)[0]).toBe(all[0].path);
+    expect(overlay.querySelectorAll(".inbox-row").length).toBe(22);
+    expect(
+      (overlay.querySelector(".inbox-list") as HTMLElement).style.height,
+    ).toBe("48000px");
+  });
+
+  it("moves the window on scroll", async () => {
+    const all = entries(1_000);
+    const { root } = mount(all);
+    const overlay = openModal(root);
+    const body = overlay.querySelector(".inbox-modal-body") as HTMLElement;
+    body.scrollTop = 400 * ROW_HEIGHT;
+
+    body.dispatchEvent(new Event("scroll"));
+    await nextFrame();
+
+    const paths = rowPaths(overlay);
+    expect(paths[0]).toBe(all[394].path);
+    expect(paths[paths.length - 1]).toBe(all[415].path);
+  });
+
+  it("opens a row and closes the modal", () => {
+    const all = entries(10);
+    const onOpen = vi.fn();
+    const { root } = mount(all, onOpen);
+    const overlay = openModal(root);
+
+    (overlay.querySelector(".inbox-row") as HTMLElement).click();
+
+    expect(onOpen).toHaveBeenCalledWith(all[0].path);
+    expect(document.querySelector(".inbox-overlay")).toBeNull();
+  });
+
+  it("closes on Escape, the close button and a backdrop click", () => {
+    const { root } = mount(entries(10));
+
+    let overlay = openModal(root);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(overlay.isConnected).toBe(false);
+
+    overlay = openModal(root);
+    (overlay.querySelector(".inbox-modal-close") as HTMLButtonElement).click();
+    expect(overlay.isConnected).toBe(false);
+
+    overlay = openModal(root);
+    overlay.click();
+    expect(overlay.isConnected).toBe(false);
+  });
+
+  it("disables the All-files button when no files match", () => {
+    const { root } = mount([]);
+    expect((root.querySelector(".inbox-browse") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 });
 

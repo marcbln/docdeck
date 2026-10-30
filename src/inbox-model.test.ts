@@ -1,10 +1,77 @@
 import { describe, expect, it } from "vitest";
 
-import { InboxModel, type InboxSeed } from "./inbox-model";
+import {
+  InboxModel,
+  sectionInbox,
+  type InboxEntry,
+  type InboxSeed,
+} from "./inbox-model";
 
 function seed(path: string, modifiedTime: number): InboxSeed {
   return { path, filename: path.split("/").pop() ?? path, modifiedTime };
 }
+
+function row(path: string, overrides: Partial<InboxEntry> = {}): InboxEntry {
+  return {
+    path,
+    filename: path.split("/").pop() ?? path,
+    modifiedTime: 1_000,
+    unread: false,
+    deleted: false,
+    ...overrides,
+  };
+}
+
+describe("sectionInbox", () => {
+  it("puts unread and deleted rows under changed", () => {
+    const sections = sectionInbox(
+      [
+        row("/a/unread.md", { unread: true }),
+        row("/a/deleted.md", { deleted: true }),
+        row("/a/plain.md"),
+      ],
+      new Set(),
+    );
+
+    expect(sections.changed.map((item) => item.filename)).toEqual([
+      "unread.md",
+      "deleted.md",
+    ]);
+    expect(sections.opened).toEqual([]);
+  });
+
+  it("puts open plain rows under opened and never duplicates a changed row", () => {
+    const openPaths = new Set(["/a/open.md", "/a/unread.md"]);
+    const sections = sectionInbox(
+      [row("/a/unread.md", { unread: true }), row("/a/open.md")],
+      openPaths,
+    );
+
+    expect(sections.changed.map((item) => item.filename)).toEqual(["unread.md"]);
+    expect(sections.opened.map((item) => item.filename)).toEqual(["open.md"]);
+  });
+
+  it("keeps the given newest-first order in both sections", () => {
+    const sections = sectionInbox(
+      [
+        row("/a/new.md", { unread: true }),
+        row("/a/open-new.md"),
+        row("/a/old.md", { unread: true }),
+        row("/a/open-old.md"),
+      ],
+      new Set(["/a/open-new.md", "/a/open-old.md"]),
+    );
+
+    expect(sections.changed.map((item) => item.filename)).toEqual([
+      "new.md",
+      "old.md",
+    ]);
+    expect(sections.opened.map((item) => item.filename)).toEqual([
+      "open-new.md",
+      "open-old.md",
+    ]);
+  });
+});
 
 describe("InboxModel", () => {
   it("starts every seeded row plain", () => {

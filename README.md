@@ -17,10 +17,13 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   Matching folders become recursive Markdown watches; matching files are watched
   whatever their extension. Hidden entries, symlinks and build directories are
   skipped; `exclude` patterns refine the set.
-- **File inbox** — every matched document in one list, newest first, with a
-  project chip, compacted parent path and relative time. Files changed since
-  docdeck started are bold until opened; deleted files keep a struck-through
-  row until they reappear. New files appear bold without stealing a tab.
+- **File inbox** — a focused left panel with two sections: **Change detected**
+  (unread changes and deleted files) and **Manually opened** (your tabs), newest
+  first, with a project chip, compacted parent path and relative time. The full
+  matched inventory stays out of the way in an **All files** modal, windowed so
+  thousands of paths do not slow the app down. Deleted files keep a
+  struck-through row until they reappear; new files appear bold without
+  stealing a tab.
 - **Unread tab indicator** — a background tab touched by an agent keeps its
   amber pulsing dot until activated; writing to the active tab pulses the dot
   briefly and fades.
@@ -150,14 +153,19 @@ exclude = [
   currently being scanned with running folder and file counts. Explicit
   `docdeck <file>` arguments open before the config scan starts.
 
-The **Inbox** panel lists every matched file newest-first. Bold filenames with
-an amber dot changed since docdeck started; opening the row or activating its
-tab clears the mark. New files appear bold without opening a tab; deleted files
-keep a struck-through row with their last modification time until they
-reappear or the app restarts. Unread is session-scoped: a restart clears all
-bold, and closing an unread tab does not. The inbox renders only the rows
-visible in the panel (plus a small overscan), so thousands of matched documents
-do not affect tab switching or the first paint.
+By default the **Inbox** panel is a triage list, not a directory browser. It
+shows only **Change detected** (files that changed since docdeck started, or
+were deleted) and **Manually opened** (the documents with open tabs). Bold
+filenames with an amber dot are unread changes; opening the row or activating
+its tab clears the mark and, if the tab is still open, moves the row to
+Manually opened. A file never appears in both sections. New files appear bold
+without opening a tab; deleted files keep a struck-through row with their last
+modification time until they reappear or the app restarts. Unread is
+session-scoped: a restart clears all bold, and closing an unread tab does not.
+
+The **All files (N)** button opens the complete matched inventory in a modal.
+That list keeps only the visible rows in the DOM (plus a small overscan), so
+thousands of matched documents do not affect tab switching or the first paint.
 
 Running `docdeck <folder>` adds that folder as a **session watch** alongside
 the config and lists its files in the same inbox; `docdeck <file>` opens a tab.
@@ -169,6 +177,7 @@ surface.
 | `⇄ Layout` | Switch the tab bar between top and left sidebar |
 | `⚡ Auto-Sort` | Order tabs by most recently modified |
 | `✉ Inbox` | Show or hide the file inbox |
+| `All files (N)` | Browse the complete matched inventory in a modal |
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
 | `☀ Theme` | Switch between the dark and light palettes |
@@ -240,8 +249,8 @@ src/                  Frontend — tab state, layout, markdown rendering
   preferences.ts      Versioned localStorage persistence
   project.ts          Path/components helpers: parent, project chip, compaction
   relative-time.ts    Deterministic short relative timestamps
-  inbox-model.ts      Session unread/deleted state, sorted inbox rows
-  inbox-panel.ts      Windowed inbox renderer: fixed-height row pool, visible-range painting
+  inbox-model.ts      Session unread/deleted state, sorted rows and default sections
+  inbox-panel.ts      Sectioned inbox renderer plus windowed All-files modal
   style.css           Catppuccin Mocha + Latte, layouts, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
@@ -276,9 +285,9 @@ document.
   appears as a bold inbox row (no tab opens automatically). (Watched *folders*
   do survive write-to-temp-then-rename saves, which a purely per-file watch
   could not follow.)
-- **Native find sees only the rendered inbox window.** The inbox keeps just the
-  visible rows in the DOM, so the browser's find bar cannot match rows scrolled
-  out of view. docdeck has no in-app inbox search.
+- **Native find sees only the rendered inventory window.** The All-files modal
+  keeps just the visible rows in the DOM, so the browser's find bar cannot match
+  rows scrolled out of view. docdeck has no in-app inbox search.
 - **Config is read once.** Editing `config.toml` requires a restart; there is no
   live reload or in-app editor. CLI folders are session-only — put them in the
   config to restore them on the next launch.
