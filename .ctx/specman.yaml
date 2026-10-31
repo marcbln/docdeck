@@ -1,0 +1,5 @@
+project_id: docdeck
+technologies:
+  ui: {}
+compose:
+  target: specs/_baseline.md
