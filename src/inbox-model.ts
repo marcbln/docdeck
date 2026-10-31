@@ -1,14 +1,24 @@
 /**
  * Session-scoped inbox state.
  *
- * Pure and DOM-free: `main.ts` owns the transitions, the panel renders it, and
+ * Pure and DOM-free: `main.ts` owns the transitions, the sidebar renders it, and
  * tests read it directly. One row per canonical path.
  */
 
 export interface InboxEntry {
   path: string;
   filename: string;
+  /** Filesystem modification time, epoch ms. */
   modifiedTime: number;
+  /**
+   * When the session observed this document change, epoch ms.
+   *
+   * `0` means the document is inventory only: it was seeded by a scan or opened
+   * manually, not touched by an agent since launch. Recent activity is selected
+   * from this field rather than `modifiedTime`, so a scan that finishes after a
+   * clear cannot surface pre-clear files as new.
+   */
+  changedAt: number;
   /** Changed since docdeck started and not looked at. */
   unread: boolean;
   /** Deleted on disk; kept visible until it reappears or the session ends. */
@@ -21,55 +31,45 @@ export interface InboxSeed {
   modifiedTime: number;
 }
 
-/** The two default inbox sections, already newest-first. */
-export interface InboxSections {
-  /** Unread changes and files deleted since startup. */
-  changed: InboxEntry[];
-  /** Open tabs that are not already listed as changed. */
-  opened: InboxEntry[];
+/** Where a running scan currently is, as streamed by the backend. */
+export interface ScanProgress {
+  path: string;
+  directories: number;
+  files: number;
 }
 
-/**
- * Splits sorted entries into the two sections the panel shows by default.
- *
- * A file can be both changed and open. It stays in `changed` only while the
- * change is unacknowledged (unread or deleted) so sections never duplicate a
- * row; reading it moves it to `opened`.
- */
-export function sectionInbox(
-  entries: readonly InboxEntry[],
-  openPaths: ReadonlySet<string>,
-): InboxSections {
-  const changed: InboxEntry[] = [];
-  const opened: InboxEntry[] = [];
-  const changedPaths = new Set<string>();
-
-  for (const entry of entries) {
-    if (entry.unread || entry.deleted) {
-      changed.push(entry);
-      changedPaths.add(entry.path);
-    }
-  }
-
-  for (const entry of entries) {
-    if (openPaths.has(entry.path) && !changedPaths.has(entry.path)) {
-      opened.push(entry);
-    }
-  }
-
-  return { changed, opened };
+/** Everything the sidebar needs to explain the current watch state. */
+export interface InboxStatus {
+  configPath: string;
+  configFound: boolean;
+  error: string | null;
+  warnings: string[];
+  truncated: boolean;
+  loading: boolean;
+  progress: ScanProgress | null;
 }
 
 export class InboxModel {
   private readonly entries = new Map<string, InboxEntry>();
 
-  /** Inventory (startup or a session folder): unseen rows stay plain. */
+  /** Injectable clock so observation times are deterministic in tests. */
+  constructor(private readonly now: () => number = Date.now) {}
+
+  /**
+   * Inventory merge (startup or a session folder). Unseen rows stay plain and
+   * are never counted as recent; an existing row keeps its observation time.
+   */
   merge(seeds: Iterable<InboxSeed>): boolean {
     let changed = false;
     for (const seed of seeds) {
       const existing = this.entries.get(seed.path);
       if (!existing) {
-        this.entries.set(seed.path, { ...seed, unread: false, deleted: false });
+        this.entries.set(seed.path, {
+          ...seed,
+          changedAt: 0,
+          unread: false,
+          deleted: false,
+        });
         changed = true;
         continue;
       }
@@ -102,13 +102,27 @@ export class InboxModel {
   }
 
   /**
-   * A settled create/write. `markUnread` is false for the active document,
-   * whose change is already on screen.
+   * A settled write or a manual open.
+   *
+   * `markUnread` is false for the active document, whose change is already on
+   * screen. `recordChange` is false for a manual open, which must not appear in
+   * Recently Changed; watcher writes leave it true.
    */
-  upsert(seed: InboxSeed, markUnread = true): boolean {
+  upsert(
+    seed: InboxSeed,
+    markUnread = true,
+    recordChange = true,
+  ): boolean {
     const existing = this.entries.get(seed.path);
+    const observedAt = recordChange ? this.now() : 0;
+
     if (!existing) {
-      this.entries.set(seed.path, { ...seed, unread: markUnread, deleted: false });
+      this.entries.set(seed.path, {
+        ...seed,
+        changedAt: observedAt,
+        unread: markUnread,
+        deleted: false,
+      });
       return true;
     }
 
@@ -122,6 +136,7 @@ export class InboxModel {
     existing.filename = seed.filename;
     existing.modifiedTime = seed.modifiedTime;
     existing.deleted = false;
+    if (recordChange) existing.changedAt = this.now();
     if (markUnread) existing.unread = true;
     return true;
   }
@@ -137,7 +152,30 @@ export class InboxModel {
     const entry = this.entries.get(path);
     if (!entry || entry.deleted) return false;
     entry.deleted = true;
+    entry.changedAt = this.now();
     return true;
+  }
+
+  /**
+   * Acknowledges every change observed at or before `cutoff`.
+   *
+   * Inventory rows (`changedAt === 0`) are ignored, and changes after the cutoff
+   * keep their unread state.
+   */
+  acknowledgeThrough(cutoff: number): void {
+    for (const entry of this.entries.values()) {
+      if (entry.changedAt > 0 && entry.changedAt <= cutoff) {
+        entry.unread = false;
+      }
+    }
+  }
+
+  /** Restores unread flags captured before a clear (undo). */
+  restoreUnread(flags: Readonly<Record<string, boolean>>): void {
+    for (const [path, unread] of Object.entries(flags)) {
+      const entry = this.entries.get(path);
+      if (entry) entry.unread = unread;
+    }
   }
 
   /** Newest first; ties broken by path so the order is total and stable. */

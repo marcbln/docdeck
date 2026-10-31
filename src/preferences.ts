@@ -5,12 +5,17 @@ const STORAGE_KEY = "docdeck.preferences.v1";
 const SCHEMA_VERSION = 1;
 
 export type ThemeMode = "dark" | "light";
+export type BrowseMode = "all" | "recent";
 
 export interface Preferences {
   themeMode: ThemeMode;
   tocVisible: boolean;
   frontmatterVisible: boolean;
+  /** Show the browse section. The Open Documents section is always visible. */
   inboxVisible: boolean;
+  browseMode: BrowseMode;
+  openSectionCollapsed: boolean;
+  browseSectionCollapsed: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
@@ -18,10 +23,17 @@ export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   tocVisible: false,
   frontmatterVisible: true,
   inboxVisible: true,
+  browseMode: "recent",
+  openSectionCollapsed: false,
+  browseSectionCollapsed: false,
 });
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === "dark" || value === "light";
+}
+
+function isBrowseMode(value: unknown): value is BrowseMode {
+  return value === "all" || value === "recent";
 }
 
 /**
@@ -64,6 +76,17 @@ function decode(raw: string | null): Preferences {
       typeof record.inboxVisible === "boolean"
         ? record.inboxVisible
         : DEFAULT_PREFERENCES.inboxVisible,
+    browseMode: isBrowseMode(record.browseMode)
+      ? record.browseMode
+      : DEFAULT_PREFERENCES.browseMode,
+    openSectionCollapsed:
+      typeof record.openSectionCollapsed === "boolean"
+        ? record.openSectionCollapsed
+        : DEFAULT_PREFERENCES.openSectionCollapsed,
+    browseSectionCollapsed:
+      typeof record.browseSectionCollapsed === "boolean"
+        ? record.browseSectionCollapsed
+        : DEFAULT_PREFERENCES.browseSectionCollapsed,
   };
 }
 

@@ -39,19 +39,18 @@ config expansion, file reads) is untouched.
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-`.specify/memory/constitution.md` is still the unedited template, so no ratified
-gates exist. Until `/speckit.constitution` is run, the following provisional
-gates are taken from the repository's own conventions (`AGENTS.md`,
-`_ai/conventions.md`, `package.json`):
+`.specify/memory/constitution.md` was ratified at v1.0.0 after this plan was
+drafted. The gates below map the repository's conventions and the ratified
+principles to this feature:
 
 | Gate | Requirement | Status |
 |------|-------------|--------|
-| G1 Tests | Every new pure module has Vitest coverage; `npm run test:web` passes | PASS (planned) |
-| G2 Types | `npm run typecheck` passes | PASS (planned) |
-| G3 Scope | No Rust/backend change unless a requirement cannot be met otherwise | PASS (frontend-only) |
-| G4 Dependencies | No new runtime dependency without justification | PASS (none needed) |
-| G5 Reuse | Reuse existing primitives: toggle button, toast, preferences, windowing | PASS (planned) |
-| G6 Behavior | Preserve session unread semantics and all document actions | PASS (spec FR-005, FR-023) |
+| G1 Tests (P-II) | Every new pure module has Vitest coverage; `npm run test:web` passes | PASS |
+| G2 Types (P-II) | `npm run typecheck` passes | PASS |
+| G3 Scope (P-I) | No Rust/backend change unless a requirement cannot be met otherwise | PASS (frontend-only) |
+| G4 Dependencies (P-II) | No new runtime dependency without justification | PASS (none needed) |
+| G5 Reuse (P-V) | Reuse existing primitives: toggle button, toast, preferences, windowing | PASS |
+| G6 Behavior (P-IV) | Preserve session unread semantics and all document actions; never write to files | PASS |
 
 No violations requiring justification.
 

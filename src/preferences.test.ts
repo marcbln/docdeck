@@ -21,12 +21,18 @@ describe("loadPreferences", () => {
       tocVisible: true,
       frontmatterVisible: false,
       inboxVisible: false,
+      browseMode: "all",
+      openSectionCollapsed: true,
+      browseSectionCollapsed: true,
     });
     expect(loadPreferences()).toEqual({
       themeMode: "light",
       tocVisible: true,
       frontmatterVisible: false,
       inboxVisible: false,
+      browseMode: "all",
+      openSectionCollapsed: true,
+      browseSectionCollapsed: true,
     });
   });
 
@@ -75,5 +81,31 @@ describe("loadPreferences", () => {
       }),
     );
     expect(loadPreferences().inboxVisible).toBe(true);
+  });
+
+  it("defaults the sidebar fields for a legacy payload", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "dark",
+        tocVisible: false,
+        frontmatterVisible: true,
+        inboxVisible: true,
+      }),
+    );
+    expect(loadPreferences()).toMatchObject({
+      browseMode: "recent",
+      openSectionCollapsed: false,
+      browseSectionCollapsed: false,
+    });
+  });
+
+  it("rejects an unknown browse mode", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ version: 1, browseMode: "entropy" }),
+    );
+    expect(loadPreferences().browseMode).toBe("recent");
   });
 });

@@ -5,8 +5,15 @@ import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
 import { copyText } from "./copy-code";
 import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
-import { InboxModel, type InboxSeed } from "./inbox-model";
-import { InboxPanel, type InboxStatus, type ScanProgress } from "./inbox-panel";
+import { InboxModel, type InboxSeed, type InboxStatus, type ScanProgress } from "./inbox-model";
+import { SidebarPanel } from "./sidebar-panel";
+import {
+  buildOpenRows,
+  selectRecent,
+  snapshotRecent,
+  type BrowseMode,
+  type ClearSnapshot,
+} from "./sidebar-model";
 import { classifyLink, isMarkdownPath, type ResolvedLink } from "./links";
 import {
   applyMermaidTheme,
@@ -111,7 +118,6 @@ class AppState {
   /** Path whose markup is painted; null while the empty state is showing. */
   private renderedPath: string | null = null;
   private autoSort = false;
-  private sidebarLayout = false;
 
   /**
    * Monotonic token per document. A reload only paints when it is still the
@@ -121,13 +127,10 @@ class AppState {
 
   private preferences: Preferences = loadPreferences();
 
-  private readonly appRoot = must<HTMLDivElement>("app");
-  private readonly tabsBar = must<HTMLElement>("tabs-bar");
   private readonly emptyState = must<HTMLElement>("empty-state");
   private readonly viewer = must<HTMLElement>("markdown-viewer");
   private readonly contentContainer = must<HTMLElement>("content-container");
   private readonly tocPanelEl = must<HTMLElement>("toc-panel");
-  private readonly layoutBtn = must<HTMLButtonElement>("toggle-layout-btn");
   private readonly autosortBtn = must<HTMLButtonElement>("toggle-autosort-btn");
 
   private readonly writer = createPreferenceWriter();
@@ -155,8 +158,12 @@ class AppState {
   private activeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   /** Scans whose result has not arrived yet; stale progress events are dropped. */
   private scansInFlight = 0;
-  private readonly inboxPanelEl = must<HTMLElement>("inbox-panel");
-  private readonly inboxPanel: InboxPanel;
+  /** Observation floor for Recently Changed; 0 shows the whole session. */
+  private clearedAt = 0;
+  /** Snapshot for undoing the last clear. */
+  private clearSnapshot: ClearSnapshot | null = null;
+  private readonly sidebarEl = must<HTMLElement>("sidebar");
+  private readonly sidebarPanel: SidebarPanel;
 
   constructor() {
     this.metadata = new MetadataView(
@@ -194,10 +201,27 @@ class AppState {
       onModeApplied: () => void this.renderActiveContent(),
     });
 
-    this.inboxPanel = new InboxPanel(this.inboxPanelEl, {
+    this.sidebarPanel = new SidebarPanel(this.sidebarEl, {
       onOpen: (path) => {
         if (this.tabs.has(path)) void this.setActiveTab(path);
         else void this.openDocument(path);
+      },
+      onClose: (path) => void this.closeTabPath(path),
+      onClear: () => this.clearRecent(),
+      onUndo: () => this.undoClear(),
+      onModeChange: (mode) => this.setBrowseMode(mode),
+      onToggleSection: (section, collapsed) => {
+        if (section === "open") {
+          this.preferences.openSectionCollapsed = collapsed;
+        } else {
+          this.preferences.browseSectionCollapsed = collapsed;
+        }
+        this.persist();
+        this.renderSidebar();
+      },
+      onContextMenu: (path, anchor, target) => {
+        if (this.tabMenu.isOpen) return;
+        this.tabMenu.open(path, anchor, target);
       },
     });
 
@@ -206,14 +230,14 @@ class AppState {
     this.bindLinkHandling();
     this.bindShortcuts();
     this.theme.apply(this.preferences.themeMode);
-    this.renderInbox();
+    this.renderSidebar();
     void this.start();
   }
 
   /** Applies the restored preferences before any control is clicked. */
   private applyPreferencesToUi(): void {
     this.tocPanelEl.hidden = !this.preferences.tocVisible;
-    this.inboxPanelEl.hidden = !this.preferences.inboxVisible;
+    this.sidebarPanel.setBrowseVisible(this.preferences.inboxVisible);
   }
 
   private persist(): void {
@@ -252,32 +276,26 @@ class AppState {
   // -- wiring ---------------------------------------------------------------
 
   private bindControls(): void {
-    this.layoutBtn.addEventListener("click", () => {
-      this.sidebarLayout = !this.sidebarLayout;
-      this.appRoot.classList.toggle("layout-top", !this.sidebarLayout);
-      this.appRoot.classList.toggle("layout-side", this.sidebarLayout);
-    });
-
     this.autosortBtn.addEventListener("click", () => {
       this.autoSort = !this.autoSort;
       this.autosortBtn.classList.toggle("active", this.autoSort);
       this.autosortBtn.textContent = `⚡ Auto-Sort: ${
         this.autoSort ? "ON" : "OFF"
       }`;
-      this.renderTabs();
+      this.renderSidebar();
     });
 
     createToggleButton({
       element: must<HTMLButtonElement>("toggle-inbox-btn"),
       icon: "✉",
-      label: "Inbox",
-      tooltip: "Toggle File Inbox",
+      label: "Browse",
+      tooltip: "Toggle the browse list",
       initialState: this.preferences.inboxVisible,
       formatLabel: (state) => (state ? "ON" : "OFF"),
       onChange: (next) => {
         this.preferences.inboxVisible = next;
-        this.inboxPanelEl.hidden = !next;
-        if (next) this.inboxPanel.refresh();
+        this.sidebarPanel.setBrowseVisible(next);
+        if (next) this.sidebarPanel.refresh();
         this.persist();
       },
     });
@@ -438,8 +456,7 @@ class AppState {
           if (result.reload) reloads.push(change.path);
         }
 
-        if (tabsChanged) this.renderTabs();
-        if (inboxChanged) this.renderInbox();
+        if (tabsChanged || inboxChanged) this.renderSidebar();
         if (activeDeleted) void this.renderActiveContent();
         for (const path of reloads) void this.reloadDocument(path);
       });
@@ -448,7 +465,7 @@ class AppState {
       await listen<ScanProgress>("scan-progress", (event) => {
         if (this.scansInFlight === 0) return;
         this.inboxStatus = { ...this.inboxStatus, progress: event.payload };
-        this.inboxPanel.setProgress(event.payload);
+        this.sidebarPanel.setProgress(event.payload);
       });
     } catch (error) {
       console.error("Failed to attach backend listeners", error);
@@ -486,8 +503,8 @@ class AppState {
       }
 
       // A manually opened document joins the session inventory even when it is
-      // outside every watch root, so it can appear under "Manually opened" and
-      // in the All-files modal. It is never marked unread: the reader is
+      // outside every watch root, so it can appear in All Documents. It is never
+      // marked unread and never counted as recent activity: the reader is
       // opening it right now.
       this.inbox.upsert(
         {
@@ -496,8 +513,9 @@ class AppState {
           modifiedTime: data.modified_time,
         },
         false,
+        false,
       );
-      this.renderInbox();
+      this.renderSidebar();
 
       await this.setActiveTab(data.path);
       if (fragment !== null) scrollToAnchor(this.contentContainer, fragment);
@@ -607,7 +625,7 @@ class AppState {
         tab.hasUnreadUpdate = true;
       }
 
-      this.renderTabs();
+      this.renderSidebar();
       if (this.activePath === path) {
         await this.renderActiveContent();
       }
@@ -616,20 +634,19 @@ class AppState {
     }
   }
 
-  /** Pulses a tab's dot once for an active-document write, then clears it. */
+  /** Pulses a row's dot once for an active-document write, then clears it. */
   private flashActiveTab(path: string): void {
     if (this.activeUpdateTimer !== null) clearTimeout(this.activeUpdateTimer);
     this.activeUpdatePath = path;
-    this.renderTabs();
+    this.renderSidebar();
     this.activeUpdateTimer = setTimeout(() => {
       this.activeUpdateTimer = null;
       this.activeUpdatePath = null;
-      this.renderTabs();
+      this.renderSidebar();
     }, 2500);
   }
 
   public async setActiveTab(path: string): Promise<void> {
-    const previous = this.activePath;
     this.activePath = path;
     const tab = this.tabs.get(path);
     if (tab) tab.hasUnreadUpdate = false;
@@ -640,15 +657,10 @@ class AppState {
       this.activeUpdatePath = null;
     }
 
-    const becameRead = this.inbox.markRead(path);
-    if (becameRead) {
-      // The row moves from "Change detected" to "Manually opened".
-      this.renderInbox();
-    } else {
-      this.inboxPanel.setActive(previous, path);
-    }
-
-    this.renderTabs();
+    // Reading a document acknowledges its change, which removes it from
+    // Recently Changed's unread state.
+    this.inbox.markRead(path);
+    this.renderSidebar();
     await this.renderActiveContent();
   }
 
@@ -674,17 +686,11 @@ class AppState {
       this.activePath = remaining[remaining.length - 1] ?? null;
     }
 
-    this.renderTabs();
-    this.renderInbox();
+    this.renderSidebar();
     await this.renderActiveContent();
   }
 
-  private async closeTab(path: string, event: MouseEvent): Promise<void> {
-    event.stopPropagation();
-    await this.closeTabPath(path);
-  }
-
-  /** Copies the tab's absolute path and reports the outcome with a toast. */
+  /** Copies a document's absolute path and reports the outcome with a toast. */
   private async copyTabPath(path: string): Promise<void> {
     const copied = await copyText(path);
     this.toast.show(
@@ -699,7 +705,7 @@ class AppState {
   private async loadWatchConfig(): Promise<void> {
     this.scansInFlight += 1;
     this.inboxStatus = { ...this.inboxStatus, loading: true, progress: null };
-    this.renderInbox();
+    this.renderSidebar();
     try {
       const result = await invoke<WatchLoad>("load_watches");
       for (const root of result.roots) this.watchRoots.add(root);
@@ -713,6 +719,7 @@ class AppState {
             filename: tab.filename,
             modifiedTime: tab.modifiedTime,
           },
+          false,
           false,
         );
       }
@@ -739,7 +746,7 @@ class AppState {
     } finally {
       this.scansInFlight -= 1;
     }
-    this.renderInbox();
+    this.renderSidebar();
   }
 
   /** Registers session watches for CLI folder arguments. */
@@ -760,90 +767,71 @@ class AppState {
       this.scansInFlight -= 1;
       if (this.scansInFlight === 0) this.inboxStatus.progress = null;
     }
-    this.renderInbox();
+    this.renderSidebar();
   }
 
-  private renderInbox(): void {
-    this.inboxPanel.render(
+  private renderSidebar(): void {
+    const entries = this.inbox.entriesSorted();
+    this.sidebarPanel.render({
+      openRows: buildOpenRows(
+        this.tabs.values(),
+        this.activePath,
+        this.autoSort,
+      ),
+      browseMode: this.preferences.browseMode,
+      inventory: entries,
+      recent: selectRecent(entries, this.clearedAt),
+      openPaths: new Set(this.tabs.keys()),
+      activePath: this.activePath,
+      activeUpdatePath: this.activeUpdatePath,
+      status: this.inboxStatus,
+      openCollapsed: this.preferences.openSectionCollapsed,
+      browseCollapsed: this.preferences.browseSectionCollapsed,
+      canUndo: this.clearSnapshot !== null,
+      now: Date.now(),
+    });
+  }
+
+  private setBrowseMode(mode: BrowseMode): void {
+    if (this.preferences.browseMode === mode) return;
+    this.preferences.browseMode = mode;
+    this.persist();
+    this.renderSidebar();
+  }
+
+  /**
+   * Clears the recent activity list and acknowledges the unread markers for the
+   * changes it covered. The snapshot makes the action undoable.
+   */
+  private clearRecent(): void {
+    if (this.stateRecentCount() === 0) return;
+
+    this.clearSnapshot = snapshotRecent(
       this.inbox.entriesSorted(),
-      this.inboxStatus,
-      new Set(this.tabs.keys()),
-      this.activePath,
+      this.clearedAt,
+    );
+    const cutoff = Date.now();
+    this.inbox.acknowledgeThrough(cutoff);
+    this.clearedAt = cutoff;
+    this.renderSidebar();
+    this.toast.show(
+      "Recent changes cleared. Use Undo in the sidebar to restore them.",
+      "info",
     );
   }
 
-  // -- rendering ------------------------------------------------------------
+  private undoClear(): void {
+    if (this.clearSnapshot === null) return;
+    const snapshot = this.clearSnapshot;
+    this.clearSnapshot = null;
+    this.clearedAt = snapshot.clearedAt;
+    this.inbox.restoreUnread(snapshot.unread);
+    this.renderSidebar();
+    this.toast.show("Clear undone", "info");
+  }
 
-  private renderTabs(): void {
-    this.tabsBar.replaceChildren();
-
-    const ordered = [...this.tabs.values()];
-    if (this.autoSort) {
-      ordered.sort((a, b) => b.modifiedTime - a.modifiedTime);
-    }
-
-    for (const tab of ordered) {
-      const item = document.createElement("div");
-      item.className = "tab-item";
-      item.setAttribute("role", "tab");
-      item.setAttribute("tabindex", "0");
-      if (tab.path === this.activePath) item.classList.add("active");
-      if (tab.hasUnreadUpdate) item.classList.add("has-update");
-      if (tab.path === this.activeUpdatePath) item.classList.add("active-update");
-      if (tab.deletedOnDisk) item.classList.add("deleted");
-      item.title = tab.deletedOnDisk
-        ? `${tab.path} (deleted on disk)`
-        : tab.path;
-      item.addEventListener("click", () => void this.setActiveTab(tab.path));
-      item.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        // A keyboard-opened menu may be followed by the webview's own
-        // contextmenu event; never reposition an already-open menu to (0, 0).
-        if (this.tabMenu.isOpen) return;
-        this.tabMenu.open(
-          tab.path,
-          { x: event.clientX, y: event.clientY },
-          item,
-        );
-      });
-      item.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          void this.setActiveTab(tab.path);
-          return;
-        }
-        if (
-          event.key === "ContextMenu" ||
-          (event.shiftKey && event.key === "F10")
-        ) {
-          event.preventDefault();
-          this.tabMenu.open(
-            tab.path,
-            { rect: item.getBoundingClientRect() },
-            item,
-          );
-        }
-      });
-
-      const dot = document.createElement("span");
-      dot.className = "tab-dot";
-
-      const title = document.createElement("span");
-      title.className = "tab-title";
-      title.textContent = tab.filename;
-
-      const close = document.createElement("span");
-      close.className = "tab-close";
-      close.textContent = "×";
-      close.setAttribute("role", "button");
-      close.setAttribute("aria-label", `Close ${tab.filename}`);
-      close.addEventListener("click", (event) => {
-        void this.closeTab(tab.path, event);
-      });
-
-      item.append(dot, title, close);
-      this.tabsBar.appendChild(item);
-    }
+  private stateRecentCount(): number {
+    return selectRecent(this.inbox.entriesSorted(), this.clearedAt).length;
   }
 
   /**

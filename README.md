@@ -1,10 +1,11 @@
 # docdeck
 
-A lightweight, tabbed Markdown viewer built for **watching AI agents write documents**.
+A lightweight Markdown viewer with a document sidebar, built for **watching AI agents write documents**.
 
 Agents stream plans, progress logs and status reports straight to the local
-filesystem while you work somewhere else. docdeck opens those files in tabs and
-picks up their changes live — no reload, no polling, no second browser.
+filesystem while you work somewhere else. docdeck lists those files in a
+sidebar and picks up their changes live — no reload, no polling, no second
+browser.
 
 ```
 docdeck plans/refactor_plan.md reports/agent_status.md
@@ -17,25 +18,27 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   Matching folders become recursive Markdown watches; matching files are watched
   whatever their extension. Hidden entries, symlinks and build directories are
   skipped; `exclude` patterns refine the set.
-- **File inbox** — a focused left panel with two sections: **Change detected**
-  (unread changes and deleted files) and **Manually opened** (your tabs), newest
-  first, with a project chip, compacted parent path and relative time. The full
-  matched inventory stays out of the way in an **All files** modal, windowed so
-  thousands of paths do not slow the app down. Deleted files keep a
-  struck-through row until they reappear; new files appear bold without
-  stealing a tab.
-- **Unread tab indicator** — a background tab touched by an agent keeps its
-  amber pulsing dot until activated; writing to the active tab pulses the dot
-  briefly and fades.
-- **Top tabs or left sidebar** — toggle the tab bar between a horizontal strip and
-  a vertical rail for deep directory trees.
-- **Auto-sort by last update** — bump the documents an agent just touched to the top.
-- **Copy a tab's path** — right-click any tab (or press `Shift+F10` / the
-  ContextMenu key) to copy the document's absolute path. Hovering a tab shows
+- **Single left sidebar** — **Open documents** sits above a browsable document
+  list. Open rows replace the old tab strip: activate one to switch documents,
+  close it with `×`, or copy its path from the context menu. The sidebar is
+  always present, so document switching can never disappear.
+- **Browse all or recently changed** — the lower list switches between the
+  complete watched inventory and **Recently changed**, a session-scoped,
+  de-duplicated activity list ordered by the moment docdeck observed each write.
+  **Clear** empties the activity list and acknowledges its unread markers;
+  **Undo** restores both. A document may appear in Open documents and Recently
+  changed at the same time, because the lists answer different questions.
+- **Unread indicator** — a background document touched by an agent keeps its
+  amber pulsing dot until activated; writing to the active document pulses the
+  dot briefly and fades.
+- **Auto-sort by last update** — bump the documents an agent just touched to the
+  top of Open documents.
+- **Copy a document's path** — right-click any row (or press `Shift+F10` / the
+  ContextMenu key) to copy the document's absolute path. Hovering a row shows
   the same path as a tooltip, and a short toast confirms the copy.
-- **Reopen closed tabs** — `Ctrl+Shift+T` (`Cmd+Shift+T` on macOS) reopens the
-  most recently closed document, browser-style. Repeated presses walk back
-  through the session's closed tabs; documents deleted in the meantime are
+- **Reopen closed documents** — `Ctrl+Shift+T` (`Cmd+Shift+T` on macOS) reopens
+  the most recently closed document, browser-style. Repeated presses walk back
+  through the session's closed documents; documents deleted in the meantime are
   skipped after reporting the read error.
 - **Single-instance CLI** — running `docdeck <file>` or `docdeck <folder>` from any
   terminal reaches the *running* window instead of starting a second process.
@@ -145,7 +148,7 @@ exclude = [
   globs apply on top.
 - The config is read once at startup; restart docdeck after editing it.
 - Expansion is capped at 256 watched roots, 10,000 files and 100,000 visited
-  entries per walk; the inbox names any selector that was truncated. `**`
+  entries per walk; the sidebar names any selector that was truncated. `**`
   walks are breadth-first, so shallow matches are found even when the entry cap
   is hit. Bounded selectors walk depth-first but follow each pattern segment,
   skipping unrelated siblings (a shop's `vol/mariadb`, for example); use one to
@@ -153,35 +156,44 @@ exclude = [
   CMS media tree, for example) stops at the entry cap instead of spending
   minutes walking directories that cannot contain documents.
 - Scanning runs in the background so the window stays responsive. While a
-  selector is being expanded or a root is being read, the Inbox shows the path
+  selector is being expanded or a root is being read, the sidebar shows the path
   currently being scanned with running folder and file counts. Explicit
   `docdeck <file>` arguments open before the config scan starts.
 
-By default the **Inbox** panel is a triage list, not a directory browser. It
-shows only **Change detected** (files that changed since docdeck started, or
-were deleted) and **Manually opened** (the documents with open tabs). Bold
-filenames with an amber dot are unread changes; opening the row or activating
-its tab clears the mark and, if the tab is still open, moves the row to
-Manually opened. A file never appears in both sections. New files appear bold
-without opening a tab; deleted files keep a struck-through row with their last
-modification time until they reappear or the app restarts. Unread is
-session-scoped: a restart clears all bold, and closing an unread tab does not.
+The sidebar has two stacked sections. **Open documents** is the tab registry
+rendered as rows: one row per open document, with an active highlight, an
+unread dot, a deleted marker and a close control. Its order is the order the
+documents were opened unless **Auto-sort** is on, which orders by most recent
+write. **Open documents** is always visible; the `✉ Browse` toggle only hides
+the lower section.
 
-The **All files (N)** button opens the complete matched inventory in a modal.
-That list keeps only the visible rows in the DOM (plus a small overscan), so
-thousands of matched documents do not affect tab switching or the first paint.
+The lower section switches between two modes. **All documents** lists every
+watched path once, with a project chip, compacted parent path, relative
+modification time, and open/unread/deleted state. **Recently changed** lists
+distinct documents whose change docdeck observed since launch, newest first, and
+stays empty until an agent writes. A write updates one row rather than appending
+a new one. Documents can appear in both Open documents and Recently changed.
+
+**Clear** empties Recently changed and acknowledges the unread markers for the
+changes it covered; **Undo** restores the previous list and unread state.
+Clearing is session-scoped like unread: a restart starts with no recent
+activity. The `⤢` button opens the same inventory in a full-height modal. Both
+the inline list and the modal keep only the visible rows in the DOM (plus a
+small overscan), so thousands of matched documents do not affect document
+switching or the first paint.
 
 Running `docdeck <folder>` adds that folder as a **session watch** alongside
-the config and lists its files in the same inbox; `docdeck <file>` opens a tab.
-Nothing is opened automatically when a file changes — the inbox is the triage
-surface.
+the config and lists its files in the sidebar; `docdeck <file>` opens a
+document. Nothing is opened automatically when a file changes — the browse list
+is the triage surface.
 
 | Control | Action |
 | --- | --- |
-| `⇄ Layout` | Switch the tab bar between top and left sidebar |
-| `⚡ Auto-Sort` | Order tabs by most recently modified |
-| `✉ Inbox` | Show or hide the file inbox |
-| `All files (N)` | Browse the complete matched inventory in a modal |
+| `⚡ Auto-Sort` | Order Open documents by most recently modified |
+| `✉ Browse` | Show or hide the lower browse section |
+| `All` / `Recently changed` | Switch the browse list's mode |
+| `Clear` / `Undo` | Clear recent activity and acknowledge it / restore it |
+| `⤢` | Browse the complete matched inventory in a full-height modal |
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
 | `☀ Theme` | Switch between the dark and light palettes |
@@ -198,17 +210,19 @@ surface.
 | `⛶` on a diagram | Open it in the fullscreen overlay |
 | The inline button on a diagram | Switch between the zoom panel and normal document flow |
 | `Esc` in fullscreen | Close the overlay |
-| Click a row | Open the document (like clicking its tab) |
-| Click a tab | Activate it and clear its unread dot |
-| `×` on a tab | Close it and release its file watch (watched folders stay live) |
-| `Ctrl+Shift+T` / `Cmd+Shift+T` | Reopen the most recently closed tab |
+| Click a browse row | Open the document, or activate it if already open |
+| Click an open row | Activate it and clear its unread dot |
+| `×` on an open row | Close it and release its file watch (watched folders stay live) |
+| `Ctrl+Shift+T` / `Cmd+Shift+T` | Reopen the most recently closed document |
 
 ### Preferences
 
-Theme, outline, frontmatter and inbox visibility are stored under the
-`docdeck.preferences.v1` key in `localStorage`, so docdeck reopens the way you
-left it. Clear that key to reset to defaults (dark theme, outline hidden,
-frontmatter shown, inbox shown).
+Theme, outline, frontmatter, browse visibility, browse mode and the collapsed
+state of each sidebar section are stored under the `docdeck.preferences.v1` key
+in `localStorage`, so docdeck reopens the way you left it. Recently changed
+activity is session-scoped and is not persisted. Clear that key to reset to
+defaults (dark theme, outline hidden, frontmatter shown, browse shown in
+Recently changed mode, both sections expanded).
 
 ## Development
 
@@ -234,7 +248,7 @@ agent create, edit, delete and recreate documents inside it. See
 ## Architecture
 
 ```
-src/                  Frontend — tab state, layout, markdown rendering
+src/                  Frontend — document state, sidebar, markdown rendering
   main.ts             AppState: tab registry, CLI events, watcher events, wiring
   markdown.ts         marked + highlight.js + mermaid pipeline, heading ids
   mermaid-zoom-math.ts Pure fit/zoom/pan geometry for diagram viewports
@@ -245,7 +259,7 @@ src/                  Frontend — tab state, layout, markdown rendering
   frontmatter.ts      YAML header split + parse into table rows
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
-  tab-menu.ts         Right-click menu for tabs: positioning, dismissal, focus
+  tab-menu.ts         Right-click menu for document rows: positioning, dismissal, focus
   closed-tabs.ts      Session stack of closed paths and the reopen shortcut
   theme.ts            Stylesheet swap, Catppuccin Latte, mermaid theming
   toast.ts            Transient themed status messages
@@ -255,9 +269,13 @@ src/                  Frontend — tab state, layout, markdown rendering
   preferences.ts      Versioned localStorage persistence
   project.ts          Path/components helpers: parent, project chip, compaction
   relative-time.ts    Deterministic short relative timestamps
-  inbox-model.ts      Session unread/deleted state, sorted rows and default sections
-  inbox-panel.ts      Sectioned inbox renderer plus windowed All-files modal
-  style.css           Catppuccin Mocha + Latte, layouts, markdown overrides
+  inbox-model.ts      Session unread/deleted/observation state and sorted rows
+  sidebar-model.ts    Pure Open/Recent projections, clear snapshot helpers
+  sidebar-panel.ts    Two-section sidebar: Open documents and the browse list
+  sidebar-rows.ts     Shared two-line row anatomy for browse surfaces
+  virtual-list.ts     Windowed list geometry and DOM row recycler
+  browse-modal.ts     Full-height windowed inventory pop-out
+  style.css           Catppuccin Mocha + Latte, sidebar, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
   commands.rs         load_file / close_file / load_watches / add_watch
@@ -278,22 +296,23 @@ only at five `invoke` commands and two events:
 | → webview | `paths-changed` | `[{ path, exists, modifiedTime }]` — a batch of settled watcher events |
 
 `exists` is sampled after the debounce window closed, which is all the
-classification the UI needs: reload the document, or mark its tab as deleted.
-`modifiedTime` updates inbox ordering and relative times without re-reading the
-document.
+classification the UI needs: reload the document, or mark its row as deleted.
+`modifiedTime` updates sidebar ordering and relative times without re-reading
+the document.
 
 ## Known limitations
 
 - **Linux only.** Relies on `inotify` and WebKitGTK.
 - **Renders markdown only.** No editing.
-- **No rename tracking.** A rename surfaces as a remove plus a create: the old
-  tab keeps its content with the "deleted on disk" marker while the new path
-  appears as a bold inbox row (no tab opens automatically). (Watched *folders*
+- **No rename tracking.** A rename surfaces as a remove plus a create: the open
+  row keeps its content with the "deleted on disk" marker while the new path
+  appears as a bold row (no document opens automatically). (Watched *folders*
   do survive write-to-temp-then-rename saves, which a purely per-file watch
   could not follow.)
-- **Native find sees only the rendered inventory window.** The All-files modal
-  keeps just the visible rows in the DOM, so the browser's find bar cannot match
-  rows scrolled out of view. docdeck has no in-app inbox search.
+- **Native find sees only the rendered browse window.** The inline browse list
+  and the pop-out inventory keep just the visible rows in the DOM, so the
+  browser's find bar cannot match rows scrolled out of view. docdeck has no
+  in-app browse search.
 - **Config is read once.** Editing `config.toml` requires a restart; there is no
   live reload or in-app editor. CLI folders are session-only — put them in the
   config to restore them on the next launch.

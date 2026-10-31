@@ -112,6 +112,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cwd`.
 
 ### Changed
+- The horizontal tab strip is replaced by a single always-present left sidebar.
+  **Open documents** rows switch, close and reopen documents; the lower section
+  switches between **All documents** and **Recently changed**. Almost all
+  document actions (active highlight, unread dot, close, copy path, Auto-Sort)
+  are unchanged, but the `⇄ Layout` toggle is gone and the `✉ Inbox` toggle now
+  shows or hides only the browse section.
+- Recently changed is a session-scoped, de-duplicated activity list ordered by
+  the moment docdeck observed each write. **Clear** empties it and acknowledges
+  the unread markers for those changes; **Undo** restores both. A document may
+  appear in both Open documents and Recently changed.
+- The complete inventory is now inline in the sidebar and shares a windowed
+  renderer with the retained full-height `⤢` pop-out, so thousands of watched
+  documents do not slow document switching.
 - CLI folder arguments no longer open a picker or auto-open tabs: a folder adds
   a session watch and its files appear in the inbox; a file argument opens a
   tab. New and modified files are never opened automatically.
@@ -121,8 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `npm test` now runs the Rust suite and the frontend vitest suite in sequence.
 - Frontend logic is split into focused modules (`frontmatter`, `toc`,
   `preferences`, `theme`, `toc-panel`, `metadata-table`, `toolbar`, `copy-code`,
-  `project`, `relative-time`, `inbox-model`, `inbox-panel`) with `main.ts`
-  reduced to orchestration.
+  `project`, `relative-time`, `inbox-model`, `sidebar-model`, `sidebar-panel`,
+  `virtual-list`, `browse-modal`) with `main.ts` reduced to orchestration.
 
 ### Removed
 - Folder picker modal and file tree (`folder-modal`, `file-tree`), the
