@@ -27,6 +27,7 @@ function recent(path: string, changedAt: number, overrides: Partial<InboxEntry> 
     changedAt,
     unread: true,
     deleted: false,
+    origin: "manual",
     ...overrides,
   };
 }
@@ -114,5 +115,18 @@ describe("snapshotRecent", () => {
       clearedAt: 2_000,
       unread: { "/a/new.md": false },
     });
+  });
+  it("keeps persisted unread markers out of Recently Changed", () => {
+    const persistedUnread = recent("/a/changed-closed.md", 0, {
+      unread: true,
+      modifiedTime: 9_000,
+    });
+    const sessionChange = recent("/a/live.md", 5_000, { unread: true });
+
+    const selected = selectRecent([persistedUnread, sessionChange], 4_000);
+
+    expect(selected.map((entry) => entry.path)).toEqual(["/a/live.md"]);
+    expect(persistedUnread.unread).toBe(true);
+    expect(persistedUnread.changedAt).toBe(0);
   });
 });

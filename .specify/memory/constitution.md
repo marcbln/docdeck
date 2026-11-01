@@ -1,5 +1,17 @@
 # docdeck Constitution
 
+<!--
+Sync Impact Report (2026-11-01, feature 002-watch-inbox-followups)
+- Version: 1.0.0 -> 1.1.0 (MINOR: materially expanded platform and persistence
+  guidance; no principle removed or redefined)
+- Modified sections: Technical Constraints -> Platform (Linux-only to
+  Linux/macOS/Windows); Technical Constraints -> Persistence (adds the
+  versioned acknowledgement store and notes the live-reload exception)
+- Added/removed principles: none
+- Templates: no `.specify/templates` change required
+- Follow-up TODOs: none
+-->
+
 ## Core Principles
 
 ### I. OS Concerns in Rust, View State in the Webview
@@ -94,17 +106,24 @@ to maintain.
 
 ## Technical Constraints
 
-- **Platform**: Linux desktop only, built on Tauri 2 (WebKitGTK) with Rust 1.80+
-  and Node.js 20+.
+- **Platform**: Linux, macOS and Windows desktop, built on Tauri 2 (WebKitGTK
+  on Linux, WKWebView on macOS, WebView2 on Windows) with Rust 1.80+ and
+  Node.js 20+. Platform-specific limitations MUST be documented, not silently
+  unsupported.
 - **Frontend**: TypeScript with Vite and vanilla DOM and CSS. The app is
   intentionally not built on a component framework or UI kit; adopting one
   requires an ADR.
 - **Dependencies**: Add runtime dependencies deliberately and keep the tree
   small. A new dependency requires justification in the change.
-- **Persistence**: UI preferences use the versioned
-  `docdeck.preferences.v1` `localStorage` key with per-field validation.
-  Document content and session state are never persisted. Configuration is read
-  once at startup unless a feature explicitly adds live reload.
+- **Persistence**: UI preferences use the versioned `docdeck.preferences.v1`
+  `localStorage` key with per-field validation. Per-document review
+  acknowledgements use the versioned `docdeck.acknowledgements.v1` key with
+  per-entry validation and corruption recovery; they decide unread state across
+  restarts. Document content, open documents, `Recently Changed` activity and
+  the browse filter are never persisted. The watch configuration is a TOML file
+  read at startup and live-reloaded after valid edits; the in-app surface may
+  write that file atomically, and it is the only file docdeck writes. Watched
+  documents remain read-only.
 - **Rendering**: GitHub-flavoured Markdown, syntax highlighting, Mermaid, and
   frontmatter tables are core behavior and MUST NOT regress.
 - **Themes**: Dark and light palettes use the Catppuccin token set; components
@@ -147,4 +166,4 @@ states the non-negotiable principles those conventions implement.
   coding guidance; they MUST remain consistent with this document. If they
   disagree, this document wins and the guidance is corrected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-10-31
+**Version**: 1.1.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-11-01

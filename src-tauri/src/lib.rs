@@ -2,22 +2,33 @@
 
 mod commands;
 mod config;
+mod config_edit;
+mod config_watch;
 mod detach;
 mod folder;
 mod navigation;
 mod paths;
+mod rename;
 mod render;
 mod tray;
 mod watcher;
 
 #[cfg(test)]
+mod commands_test;
+#[cfg(test)]
 mod config_test;
+#[cfg(test)]
+mod config_edit_test;
+#[cfg(test)]
+mod config_watch_test;
 #[cfg(test)]
 mod folder_test;
 #[cfg(test)]
 mod navigation_test;
 #[cfg(test)]
 mod paths_test;
+#[cfg(test)]
+mod rename_test;
 #[cfg(test)]
 mod render_test;
 #[cfg(test)]
@@ -30,6 +41,7 @@ use std::io;
 use std::path::Path;
 use tauri::{Emitter, Manager};
 
+use config_watch::ConfigWatchState;
 use paths::CliEntry;
 use watcher::WatcherState;
 
@@ -86,6 +98,7 @@ pub fn run() {
 
     builder
         .manage(watcher_state)
+        .manage(ConfigWatchState::new())
         .on_window_event(|window, event| {
             // Regaining focus means the user has seen the changes: retire the
             // unread dot. The tray may be disabled, so this is best-effort.
@@ -99,6 +112,15 @@ pub fn run() {
             app.state::<WatcherState>()
                 .init(app.handle().clone())
                 .map_err(io::Error::other)?;
+            // Live reload: watch the config file's parent directory. A failure
+            // here is non-fatal; the in-app surface can still save and reload.
+            let config_path = config::config_path();
+            if let Err(error) = app
+                .state::<ConfigWatchState>()
+                .start(app.handle().clone(), config_path)
+            {
+                eprintln!("[docdeck] config watcher unavailable: {error}");
+            }
             // The tray re-reads the config file itself; a malformed config is
             // already surfaced by the sidebar panel, so the tray falls back to
             // its defaults rather than duplicating the error.
@@ -116,6 +138,9 @@ pub fn run() {
             commands::load_file,
             commands::close_file,
             commands::load_watches,
+            commands::read_watch_config,
+            commands::save_watch_config,
+            commands::reload_watch_config,
             commands::add_watch,
             commands::open_external_url,
             commands::open_local_path,

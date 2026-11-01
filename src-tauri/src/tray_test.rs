@@ -2,7 +2,7 @@
 mod tests {
     use crate::config::NotifyMode;
     use crate::tray::{compose_presence_icon, notification_body, should_notify, Presence};
-    use crate::watcher::PathChange;
+    use crate::watcher::{PathChange, PathChangeKind};
     use image::RgbaImage;
     use std::time::{Duration, Instant};
 
@@ -12,7 +12,13 @@ mod tests {
 
     fn change(path: &str, exists: bool) -> PathChange {
         PathChange {
+            kind: if exists {
+                PathChangeKind::Modified
+            } else {
+                PathChangeKind::Deleted
+            },
             path: path.to_string(),
+            from_path: None,
             exists,
             modified_time: if exists { Some(0) } else { None },
         }
@@ -171,5 +177,28 @@ mod tests {
             2,
         );
         assert_eq!(body, "a.md, b.md +1 more changed");
+    }
+
+    #[test]
+    fn rename_kinds_are_ignored_by_the_notification_body() {
+        let renamed = PathChange {
+            kind: PathChangeKind::Renamed,
+            path: "/x/renamed.md".to_string(),
+            from_path: Some("/x/old.md".to_string()),
+            exists: true,
+            modified_time: Some(1),
+        };
+        let moved_out = PathChange {
+            kind: PathChangeKind::MovedOut,
+            path: "/x/left.md".to_string(),
+            from_path: None,
+            exists: false,
+            modified_time: None,
+        };
+
+        assert_eq!(
+            notification_body(&[renamed, moved_out], 3),
+            "renamed.md changed"
+        );
     }
 }

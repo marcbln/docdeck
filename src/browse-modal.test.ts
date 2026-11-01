@@ -15,6 +15,7 @@ function entry(index: number): InboxEntry {
     changedAt: NOW - index * 1_000,
     unread: false,
     deleted: false,
+    origin: "manual",
   };
 }
 
@@ -116,5 +117,26 @@ describe("InboxBrowser", () => {
   it("shows an empty message when nothing matches", () => {
     openBrowser([]);
     expect(overlay().querySelector(".inbox-empty")).not.toBeNull();
+  });
+  it("shows the filtered set and its filtered empty state", () => {
+    const browser = new InboxBrowser({
+      onOpen: vi.fn(),
+      now: () => NOW,
+      viewportHeight: VIEWPORT,
+    });
+
+    browser.open([], new Set(), null, "No documents match “plan”.");
+
+    expect(document.querySelector(".inbox-modal-count")?.textContent).toBe("0 files");
+    const empty = document.querySelector<HTMLElement>(".inbox-empty");
+    expect(empty?.hidden).toBe(false);
+    expect(empty?.textContent).toBe("No documents match “plan”.");
+  });
+
+  it("counts only the inventory it was given", () => {
+    const browser = new InboxBrowser({ onOpen: vi.fn(), now: () => NOW, viewportHeight: VIEWPORT });
+    browser.open([entry(0), entry(1)], new Set(), null, "ignored");
+
+    expect(document.querySelector(".inbox-modal-count")?.textContent).toBe("2 files");
   });
 });

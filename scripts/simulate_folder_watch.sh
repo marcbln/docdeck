@@ -103,6 +103,26 @@ printf '# Report 1\n\nRecreated at %s\n' "$(date +%T)" \
 printf 'ignored\n' > "$WORKSPACE/projects/alpha/_ai/archive/old.md"
 printf 'ignored\n' > "$WORKSPACE/projects/alpha/node_modules/skip.md"
 
+# Rename inside a watched root: one row must follow the document.
+if [[ -f "$WORKSPACE/projects/beta/_ai/backlog/report_2.md" ]]; then
+  mv "$WORKSPACE/projects/beta/_ai/backlog/report_2.md" \
+    "$WORKSPACE/projects/beta/_ai/backlog/report_two.md"
+fi
+
+# Live reload: a selector added to the running config must apply without a
+# restart. `extra/` is outside the original selector, so it only appears after
+# the rewrite below.
+mkdir -p "$WORKSPACE/extra/_ai/backlog"
+printf '# Extra plan\n' > "$WORKSPACE/extra/_ai/backlog/extra.md"
+cat > "$CONFIG_DIR/docdeck/config.toml" <<'TOML'
+watch = [
+  "/tmp/docdeck_watch_sim/projects/*/_ai",
+  "/tmp/docdeck_watch_sim/extra/_ai",
+]
+exclude = ["**/archive/**"]
+TOML
+sleep 3
+
 cat <<'EOF'
 
 Verification checklist:
@@ -118,14 +138,22 @@ Verification checklist:
      strike and makes it bold again without opening a tab.
   8. `archive/old.md` and `node_modules/skip.md` never appear, at launch or
      after being written.
-  9. In a second terminal,
+  9. `report_two.md` appears as one row (no deleted `report_2.md` row); an open,
+     read document stays open and read after the rename.
+ 10. `extra/_ai/backlog/extra.md` appears within ~2 s of the config rewrite,
+     without restarting; open documents stay open and do not become unread.
+ 11. In a second terminal,
      `DOCDECK_CONFIG=/tmp/docdeck_watch_sim_config/docdeck/config.toml \
       docdeck /tmp/docdeck_watch_sim/projects/alpha`
      adds the session root and lists its files in the same inbox.
- 10. Toggling Inbox off hides the panel; restarting docdeck restores the
-     toggle state and clears every bold mark.
- 11. Renaming the config away and restarting shows the setup hint with the
-     exact path; putting a broken TOML there shows the parse error instead.
+ 12. Toggling Inbox off hides the panel; restarting docdeck restores the toggle
+     state, leaves `Recently Changed` empty, and keeps unread markers for
+     documents changed while it was closed.
+ 13. Renaming the config away and restarting shows the setup hint with the
+     exact path; putting a broken TOML there shows the parse error instead and
+     keeps the previous watches running.
+ 14. The header `Watches` control opens the in-app editor even when the browse
+     section is hidden.
 EOF
 
 printf 'Press Ctrl+C to stop docdeck.\n'

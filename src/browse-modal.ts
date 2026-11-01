@@ -25,6 +25,7 @@ export class InboxBrowser {
   private entries: InboxEntry[] = [];
   private openPaths: ReadonlySet<string> = new Set();
   private activePath: string | null = null;
+  private emptyMessage = "No documents match the configured watches.";
 
   private readonly rendered = new Map<number, HTMLElement>();
   private readonly freeRows: HTMLElement[] = [];
@@ -47,9 +48,10 @@ export class InboxBrowser {
     entries: InboxEntry[],
     openPaths: ReadonlySet<string>,
     activePath: string | null,
+    emptyMessage = "No documents match the configured watches.",
   ): void {
     if (this.overlay === null) this.mount();
-    this.update(entries, openPaths, activePath);
+    this.update(entries, openPaths, activePath, emptyMessage);
     document.addEventListener("keydown", this.onKeyDown);
     this.overlay?.querySelector<HTMLButtonElement>(".inbox-modal-close")?.focus();
   }
@@ -58,10 +60,12 @@ export class InboxBrowser {
     entries: InboxEntry[],
     openPaths: ReadonlySet<string>,
     activePath: string | null,
+    emptyMessage = this.emptyMessage,
   ): void {
     this.entries = entries;
     this.openPaths = openPaths;
     this.activePath = activePath;
+    this.emptyMessage = emptyMessage;
 
     if (this.list === null || this.countEl === null || this.emptyEl === null) {
       return;
@@ -71,6 +75,7 @@ export class InboxBrowser {
       entries.length === 1 ? "file" : "files"
     }`;
     this.emptyEl.hidden = entries.length > 0;
+    this.emptyEl.textContent = emptyMessage;
     this.list.style.height = `${entries.length * ROW_HEIGHT}px`;
     this.renderWindow(true);
   }

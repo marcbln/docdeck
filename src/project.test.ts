@@ -39,4 +39,34 @@ describe("path helpers", () => {
     expect(compacted).toBe("…/backlog/deep/file.md");
     expect(compactPath("/tmp/a.md", 48)).toBe("/tmp/a.md");
   });
+  it("handles Windows separators, mixed slashes and drive roots", () => {
+    expect(fileName("C:\\devel\\docdeck\\_ai\\plan.md")).toBe("plan.md");
+    expect(fileName("C:/devel/docdeck/_ai/plan.md")).toBe("plan.md");
+    expect(parentPath("C:\\devel\\docdeck\\plan.md")).toBe(
+      "C:\\devel\\docdeck",
+    );
+    expect(parentPath("C:\\plan.md")).toBe("C:");
+    expect(projectName("C:\\devel\\docdeck\\_ai\\backlog\\plan.md")).toBe(
+      "docdeck",
+    );
+    expect(isUnder("C:\\devel\\docdeck\\_ai\\plan.md", "C:\\devel\\docdeck")).toBe(
+      true,
+    );
+    expect(
+      isUnder("C:\\devel\\docdeck\\_ai\\plan.md", "C:\\devel\\other"),
+    ).toBe(false);
+    expect(compactPath("C:\\devel\\docdeck\\_ai\\backlog\\plan.md", 24)).toContain(
+      "plan.md",
+    );
+  });
+
+  it("treats a backslash as a literal character in Unix-shaped paths", () => {
+    expect(fileName("/home/u/weird\\name.md")).toBe("weird\\name.md");
+    expect(projectName("/home/u/weird\\name.md")).toBeNull();
+    expect(isUnder("/home/u/a\\b.md", "/home/u")).toBe(true);
+  });
+
+  it("compares Windows roots case-insensitively", () => {
+    expect(isUnder("C:\\Devel\\Docdeck\\_ai\\a.md", "c:\\devel\\docdeck")).toBe(true);
+  });
 });

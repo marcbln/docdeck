@@ -1,7 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{expand_with_limits_and_progress, load, Limits, NotifyMode, WatchConfig};
+    use crate::config::{
+        expand_with_limits_and_progress, expand_with_platform, load, load_with_platform,
+        normalize_config_selectors, resolve_config_path, revision_of, Limits, NotifyMode, Platform,
+        WatchConfig,
+    };
+    use std::collections::HashMap;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
@@ -197,6 +203,7 @@ mod tests {
         assert_eq!(names(&plan.files), vec!["deep.md", "keep.md"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn symlinked_directories_are_skipped() {
         let home = tempdir().unwrap();
@@ -416,5 +423,167 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("file limit")));
+    }
+
+    // -- platform paths and revisions ----------------------------------------
+
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn docdeck_config_override_wins_on_every_platform() {
+        let environment = env(&[
+            ("DOCDECK_CONFIG", "/custom/config.toml"),
+            ("HOME", "/home/reader"),
+            ("XDG_CONFIG_HOME", "/xdg"),
+            ("APPDATA", "/appdata"),
+        ]);
+        for platform in [
+            Platform::Linux,
+            Platform::MacOs,
+            Platform::Windows,
+            Platform::Other,
+        ] {
+            assert_eq!(
+                resolve_config_path(platform, &environment),
+                PathBuf::from("/custom/config.toml")
+            );
+        }
+    }
+
+    #[test]
+    fn linux_uses_xdg_then_home() {
+        let xdg = env(&[("HOME", "/home/reader"), ("XDG_CONFIG_HOME", "/xdg")]);
+        assert_eq!(
+            resolve_config_path(Platform::Linux, &xdg),
+            PathBuf::from("/xdg/docdeck/config.toml")
+        );
+
+        let home_only = env(&[("HOME", "/home/reader")]);
+        assert_eq!(
+            resolve_config_path(Platform::Linux, &home_only),
+            PathBuf::from("/home/reader/.config/docdeck/config.toml")
+        );
+    }
+
+    #[test]
+    fn macos_uses_application_support() {
+        let environment = env(&[("HOME", "/Users/reader")]);
+        assert_eq!(
+            resolve_config_path(Platform::MacOs, &environment),
+            PathBuf::from("/Users/reader/Library/Application Support/docdeck/config.toml")
+        );
+    }
+
+    #[test]
+    fn windows_uses_appdata_then_userprofile() {
+        let appdata = env(&[
+            ("HOME", "/home/reader"),
+            ("APPDATA", "C:/Users/reader/AppData/Roaming"),
+        ]);
+        assert_eq!(
+            resolve_config_path(Platform::Windows, &appdata),
+            PathBuf::from("C:/Users/reader/AppData/Roaming")
+                .join("docdeck")
+                .join("config.toml")
+        );
+
+        let profile = env(&[("USERPROFILE", "C:/Users/reader")]);
+        assert_eq!(
+            resolve_config_path(Platform::Windows, &profile),
+            PathBuf::from("C:/Users/reader")
+                .join("AppData")
+                .join("Roaming")
+                .join("docdeck")
+                .join("config.toml")
+        );
+    }
+
+    #[test]
+    fn revision_is_stable_byte_sensitive_and_handles_empty_input() {
+        assert_eq!(revision_of(b"watch = []\n"), revision_of(b"watch = []\n"));
+        assert_ne!(revision_of(b"watch = []\n"), revision_of(b"watch = [ ]\n"));
+        assert_ne!(revision_of(b""), revision_of(b"\0"));
+        assert_eq!(revision_of(b"").len(), 16);
+        assert!(revision_of(b"")
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn windows_selectors_normalize_backslashes_but_unix_keeps_them() {
+        let mut windows = WatchConfig {
+            watch: vec!["C:\\notes\\_ai".to_string()],
+            exclude: vec!["**\\archive\\**".to_string()],
+            ..Default::default()
+        };
+        normalize_config_selectors(&mut windows, Platform::Windows);
+        assert_eq!(windows.watch, vec!["C:/notes/_ai"]);
+        assert_eq!(windows.exclude, vec!["**/archive/**"]);
+
+        let mut unix = WatchConfig {
+            watch: vec!["/notes/with\\backslash".to_string()],
+            ..Default::default()
+        };
+        normalize_config_selectors(&mut unix, Platform::Linux);
+        assert_eq!(unix.watch, vec!["/notes/with\\backslash"]);
+    }
+
+    #[test]
+    fn windows_backslash_selector_matches_the_forward_slash_form() {
+        let home = tempdir().unwrap();
+        fs::create_dir_all(home.path().join("notes/deep")).unwrap();
+        fs::write(home.path().join("notes/deep/a.md"), "# a").unwrap();
+
+        let forward = home
+            .path()
+            .join("notes/deep/a.md")
+            .to_string_lossy()
+            .into_owned();
+        let backward = forward.replace('/', "\\");
+
+        let forward_config = WatchConfig {
+            watch: vec![forward],
+            ..Default::default()
+        };
+        let backward_config = WatchConfig {
+            watch: vec![backward],
+            ..Default::default()
+        };
+
+        let forward_plan = expand_with_platform(
+            &forward_config,
+            home.path(),
+            Limits::default(),
+            Platform::Windows,
+            &mut |_, _, _| {},
+        );
+        let backward_plan = expand_with_platform(
+            &backward_config,
+            home.path(),
+            Limits::default(),
+            Platform::Windows,
+            &mut |_, _, _| {},
+        );
+
+        assert_eq!(names(&forward_plan.files), vec!["a.md"]);
+        assert_eq!(names(&backward_plan.files), names(&forward_plan.files));
+    }
+
+    #[test]
+    fn load_with_platform_normalizes_windows_selectors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "watch = ['C:\\notes\\_ai']\n").unwrap();
+
+        let loaded = load_with_platform(&path, Platform::Windows).unwrap();
+        assert_eq!(loaded.config.watch, vec!["C:/notes/_ai"]);
+
+        let unix = load_with_platform(&path, Platform::Linux).unwrap();
+        assert_eq!(unix.config.watch, vec!["C:\\notes\\_ai"]);
     }
 }

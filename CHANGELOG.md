@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Live watch-configuration reload: a valid save from the in-app surface or a
+  hand edit re-applies selectors and excludes within about two seconds, without
+  restarting, closing tabs or changing the active document. Invalid or
+  unreadable files keep the last working watches and show an actionable error;
+  CLI session folders survive every reload.
+- In-app **Watches** surface in the header: shows the effective configuration
+  path, validity and the most recent reload, and adds/removes watch and exclude
+  selectors. Saves preserve comments, formatting, `[tray]` and unknown keys,
+  detect outside edits by revision, validate before writing and write
+  atomically. A parse error disables structural save and offers to open the file.
+- Cross-session unread awareness: review acknowledgements are stored per
+  document under the versioned `docdeck.acknowledgements.v1` `localStorage` key
+  and compared by filesystem mtime, so documents changed while docdeck was
+  closed are unread after restart while reviewed/unchanged ones stay read.
+  First launch marks nothing unread; corrupt history is treated as a first
+  launch; history is pruned when a document leaves every watch.
+- Browse filter: a session-only search field above the list narrows All
+  documents or Recently changed by filename, folder or project
+  case-insensitively, preserving order and never changing unread/open/active/
+  deleted state. Clears with `×` or `Escape`; the pop-out inventory filters too.
+- Rename and move tracking: file-identity pairing turns a rename into one row
+  update that carries open, active and read state; move-out removes the row and
+  marks an open tab unavailable; move-in appears as new unread work; rapid and
+  case-only renames settle on one row.
+- macOS and Windows support: the configuration is discovered in each platform's
+  standard location, and Windows selectors accept native backslashes.
+
 - Panel tray icon with a chat-style presence dot: green while caught up, amber
   while detected changes are unread; the dot clears when the window regains
   focus. Left-click shows and focuses the window, right-click offers Show, a
@@ -120,6 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cwd`.
 
 ### Changed
+- Unread state now survives restarts. `Recently changed` remains session-scoped
+  and still starts empty; only the per-document read marker persists.
+- `paths-changed` carries `kind` (`created`, `modified`, `deleted`, `renamed`,
+  `movedOut`) and an optional `fromPath` so the webview can distinguish a rename
+  from a delete plus a create.
+- The watcher uses `notify-debouncer-full` (replacing
+  `notify-debouncer-mini`) to preserve event kinds; configuration edits use
+  `toml_edit` to keep hand-written content.
 - The horizontal tab strip is replaced by a single always-present left sidebar.
   **Open documents** rows switch, close and reopen documents; the lower section
   switches between **All documents** and **Recently changed**. Almost all

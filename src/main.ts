@@ -1,11 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { Acknowledgements } from "./acknowledgements";
 import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
+import {
+  type SaveOutcome,
+  type SaveWatchConfigArgs,
+  type WatchConfigView,
+} from "./config-editor-model";
+import { ConfigPanel } from "./config-panel";
 import { copyText } from "./copy-code";
+import { filterEntries } from "./filter-documents";
 import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
-import { InboxModel, type InboxSeed, type InboxStatus, type ScanProgress } from "./inbox-model";
+import {
+  InboxModel,
+  type InboxSeed,
+  type InboxStatus,
+  type ReloadResult,
+  type ReloadSummary,
+  type ScanProgress,
+} from "./inbox-model";
 import { SidebarPanel } from "./sidebar-panel";
 import {
   buildOpenRows,
@@ -51,9 +66,13 @@ interface CliEntry {
   is_dir: boolean;
 }
 
+type PathChangeKind = "created" | "modified" | "deleted" | "renamed" | "movedOut";
+
 /** A settled filesystem change for one path. */
 interface PathChange {
+  kind: PathChangeKind;
   path: string;
+  fromPath?: string;
   exists: boolean;
   modifiedTime?: number;
 }
@@ -63,6 +82,7 @@ interface InboxEntryPayload {
   path: string;
   filename: string;
   modifiedTime: number;
+  origin?: InboxSeed["origin"];
 }
 
 /** The startup config result. `error` means no watches were registered. */
@@ -74,6 +94,9 @@ interface WatchLoad {
   warnings: string[];
   error: string | null;
   truncated: boolean;
+  revision: string;
+  generation: number;
+  at: number;
 }
 
 /** The result of adding session watches for CLI folders. */
@@ -88,6 +111,7 @@ function toSeed(entry: InboxEntryPayload): InboxSeed {
     path: entry.path,
     filename: entry.filename,
     modifiedTime: entry.modifiedTime,
+    origin: entry.origin,
   };
 }
 
@@ -152,12 +176,22 @@ class AppState {
     truncated: false,
     loading: true,
     progress: null,
+    lastReload: null,
   };
   /** The tab currently playing the brief active-write pulse, if any. */
   private activeUpdatePath: string | null = null;
   private activeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   /** Scans whose result has not arrived yet; stale progress events are dropped. */
   private scansInFlight = 0;
+  /** Newest applied reload generation; older results are ignored. */
+  private reloadGeneration = 0;
+  /** Session-only browse filter; never persisted. */
+  private filterTerm = "";
+  /** Cross-session unread acknowledgements. */
+  private readonly acks: Acknowledgements;
+  /** Whether a baseline exists, so acknowledging is meaningful. */
+  private acknowledgementsReady = false;
+  private readonly configPanel: ConfigPanel;
   /** Observation floor for Recently Changed; 0 shows the whole session. */
   private clearedAt = 0;
   /** Snapshot for undoing the last clear. */
@@ -166,6 +200,26 @@ class AppState {
   private readonly sidebarPanel: SidebarPanel;
 
   constructor() {
+    this.acks = new Acknowledgements();
+    this.configPanel = new ConfigPanel({
+      readConfig: () => invoke<WatchConfigView>("read_watch_config"),
+      saveConfig: (args: SaveWatchConfigArgs) =>
+        invoke<SaveOutcome>("save_watch_config", {
+          watch: args.watch,
+          exclude: args.exclude,
+          expectedRevision: args.expectedRevision,
+          createFromExample: args.createFromExample,
+        }),
+      reloadConfig: () => invoke<ReloadResult>("reload_watch_config"),
+      openFile: (path) => {
+        void invoke("open_local_path", { path }).catch((error) => {
+          this.toast.show(`Could not open config: ${describeError(error)}`, "error");
+        });
+      },
+      onApplied: (reload) => this.applyReloadResult(reload),
+      onClosed: () => undefined,
+    });
+
     this.metadata = new MetadataView(
       this.viewer,
       this.preferences.frontmatterVisible,
@@ -211,6 +265,10 @@ class AppState {
       onClear: () => this.clearRecent(),
       onUndo: () => this.undoClear(),
       onModeChange: (mode) => this.setBrowseMode(mode),
+      onFilterChange: (term) => {
+        this.filterTerm = term;
+        this.renderSidebar();
+      },
       onToggleSection: (section, collapsed) => {
         if (section === "open") {
           this.preferences.openSectionCollapsed = collapsed;
@@ -228,6 +286,7 @@ class AppState {
 
     this.applyPreferencesToUi();
     this.bindControls();
+    this.bindConfigLifecycle();
     this.bindLinkHandling();
     this.bindShortcuts();
     this.theme.apply(this.preferences.themeMode);
@@ -277,6 +336,9 @@ class AppState {
   // -- wiring ---------------------------------------------------------------
 
   private bindControls(): void {
+    const watchesBtn = document.getElementById("toggle-watches-btn");
+    watchesBtn?.addEventListener("click", () => void this.openConfigPanel());
+
     this.autosortBtn.addEventListener("click", () => {
       this.autoSort = !this.autoSort;
       this.autosortBtn.classList.toggle("active", this.autoSort);
@@ -346,6 +408,95 @@ class AppState {
         this.persist();
       },
     });
+  }
+
+  /**
+   * Flushes persisted acknowledgements when the window goes away, so a review
+   * made in the last debounce window survives the restart.
+   */
+  private bindConfigLifecycle(): void {
+    const flush = (): void => this.acks.flush();
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+  }
+
+  private async openConfigPanel(): Promise<void> {
+    try {
+      const view = await invoke<WatchConfigView>("read_watch_config");
+      this.configPanel.open(view, this.inboxStatus.lastReload);
+    } catch (error) {
+      this.toast.show(
+        `Could not read the watch configuration: ${describeError(error)}`,
+        "error",
+      );
+    }
+  }
+
+  private static reloadSummary(result: ReloadResult): ReloadSummary {
+    return {
+      at: result.at,
+      ok: result.error === null,
+      error: result.error,
+      warnings: [...result.warnings],
+      truncated: result.truncated,
+    };
+  }
+
+  /**
+   * Applies one backend reload, ignoring any result older than the newest one
+   * already applied.
+   */
+  private applyReloadResult(result: ReloadResult): void {
+    if (result.generation < this.reloadGeneration) return;
+    this.reloadGeneration = result.generation;
+
+    this.watchRoots.clear();
+    for (const root of result.roots) this.watchRoots.add(root);
+
+    this.inboxStatus = {
+      ...this.inboxStatus,
+      configPath: result.path,
+      configFound: result.found,
+      error: result.error,
+      warnings: result.warnings,
+      truncated: result.truncated,
+      loading: false,
+      progress: null,
+      lastReload: AppState.reloadSummary(result),
+    };
+
+    if (result.error === null && result.found) {
+      this.inbox.reconcile(result.entries.map(toSeed));
+      this.afterSuccessfulInventory(false);
+    }
+
+    this.renderSidebar();
+  }
+
+  /**
+   * Establishes the acknowledgement baseline on the first successful inventory
+   * and prunes history for documents that left the watch set.
+   */
+  private afterSuccessfulInventory(startup: boolean): void {
+    const entries = this.inbox.entriesSorted().map(toSeed);
+    if (!this.acks.hasStore) {
+      this.acks.seedBaseline(entries);
+    }
+    this.acknowledgementsReady = true;
+    if (startup) this.applyAcknowledgementFlags();
+    this.acks.prune(entries.map((entry) => entry.path));
+    this.acks.flush();
+  }
+
+  private applyAcknowledgementFlags(): void {
+    const flags = this.acks.unreadFlags(this.inbox.entriesSorted());
+    this.inbox.applyUnread(flags);
+  }
+
+  /** Records the active document as reviewed at its current mtime. */
+  private acknowledgeActive(path: string, modifiedTime: number): void {
+    if (!this.acknowledgementsReady) return;
+    this.acks.acknowledge(path, modifiedTime);
   }
 
   /** Reopens the most recently closed tab, like a browser's Ctrl+Shift+T. */
@@ -462,6 +613,11 @@ class AppState {
         for (const path of reloads) void this.reloadDocument(path);
       });
 
+      // A settled configuration reload (external edit, save or recovery).
+      await listen<ReloadResult>("config-reloaded", (event) => {
+        this.applyReloadResult(event.payload);
+      });
+
       // Live position of the (possibly minutes-long) config or folder scan.
       await listen<ScanProgress>("scan-progress", (event) => {
         if (this.scansInFlight === 0) return;
@@ -552,9 +708,10 @@ class AppState {
    * Handles one settled watcher event.
    *
    * Deleted files keep their tab (content included) and get a marker; their
-   * inbox row is struck through until the file reappears. Existing files
-   * reload their tab when one is open and update the inbox row. Nothing is
-   * ever opened automatically: the inbox is the triage surface.
+   * inbox row is struck through until the file reappears. A moved-out file
+   * leaves the browse list and keeps its tab with the unavailable banner. A
+   * rename re-keys the tab and the inbox row instead of creating a second one.
+   * Nothing is ever opened automatically: the inbox is the triage surface.
    */
   private applyPathChange(change: PathChange): {
     inboxChanged: boolean;
@@ -562,44 +719,186 @@ class AppState {
     activeDeleted: boolean;
     reload: boolean;
   } {
-    const tab = this.tabs.get(change.path);
-    const isActive = this.activePath === change.path;
-    const tracked =
-      this.inbox.has(change.path) || isUnderAny(change.path, this.watchRoots);
+    switch (change.kind) {
+      case "renamed":
+        return this.applyRename(change);
+      case "movedOut":
+        return this.applyMoveOut(change);
+      case "created":
+        return this.applyCreated(change);
+      case "deleted":
+        return this.applyDeleted(change);
+      case "modified":
+      default:
+        return this.applyModified(change);
+    }
+  }
 
-    if (!change.exists) {
-      const wasDeleted = tab?.deletedOnDisk ?? false;
-      if (tab && !wasDeleted) tab.deletedOnDisk = true;
-      return {
-        inboxChanged: tracked && this.inbox.markDeleted(change.path),
-        tabsChanged: tab !== undefined && !wasDeleted,
-        activeDeleted: isActive && tab !== undefined && !wasDeleted,
-        reload: false,
-      };
+  private applyRename(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
+    const from = change.fromPath;
+    if (!from || from === change.path) return this.applyModified(change);
+
+    const tab = this.tabs.get(from);
+    let tabsChanged = false;
+    if (tab) {
+      this.tabs.delete(from);
+      tab.path = change.path;
+      tab.filename = fileName(change.path);
+      tab.deletedOnDisk = false;
+      if (change.modifiedTime !== undefined) tab.modifiedTime = change.modifiedTime;
+      this.tabs.set(change.path, tab);
+
+      const token = this.reloadTokens.get(from);
+      if (token !== undefined) {
+        this.reloadTokens.delete(from);
+        this.reloadTokens.set(change.path, token);
+      }
+      this.closedTabs.forget(from);
+      if (this.activePath === from) this.activePath = change.path;
+      tabsChanged = true;
     }
 
-    if (tracked) {
-      const seed: InboxSeed = {
+    const moved = this.inbox.rename(from, change.path);
+    this.acks.move(from, change.path);
+
+    let inboxChanged = moved;
+    if (!moved && this.isTracked(change.path)) {
+      inboxChanged =
+        this.inbox.addCreated({
+          path: change.path,
+          filename: fileName(change.path),
+          modifiedTime: change.modifiedTime ?? Date.now(),
+          origin: "config",
+        }) || inboxChanged;
+    }
+
+    return {
+      inboxChanged,
+      tabsChanged,
+      activeDeleted: false,
+      reload: false,
+    };
+  }
+
+  private applyMoveOut(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
+    const tab = this.tabs.get(change.path);
+    const isActive = this.activePath === change.path;
+    const wasDeleted = tab?.deletedOnDisk ?? false;
+    if (tab && !wasDeleted) tab.deletedOnDisk = true;
+
+    const removed = this.inbox.removeForMoveOut(change.path);
+    if (this.acknowledgementsReady) {
+      this.acks.prune(this.inbox.entriesSorted().map((entry) => entry.path));
+    }
+
+    return {
+      inboxChanged: removed,
+      tabsChanged: tab !== undefined && !wasDeleted,
+      activeDeleted: isActive && tab !== undefined && !wasDeleted,
+      reload: false,
+    };
+  }
+
+  private applyCreated(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
+    if (!this.isTracked(change.path)) {
+      return { inboxChanged: false, tabsChanged: false, activeDeleted: false, reload: false };
+    }
+    return {
+      inboxChanged: this.inbox.addCreated({
         path: change.path,
         filename: fileName(change.path),
         modifiedTime: change.modifiedTime ?? Date.now(),
-      };
-      // The active document is on screen already: update its mtime and order
-      // without pretending the reader missed something.
+        origin: "config",
+      }),
+      tabsChanged: false,
+      activeDeleted: false,
+      reload: false,
+    };
+  }
+
+  private applyDeleted(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
+    const tab = this.tabs.get(change.path);
+    const isActive = this.activePath === change.path;
+    const wasDeleted = tab?.deletedOnDisk ?? false;
+    if (tab && !wasDeleted) tab.deletedOnDisk = true;
+
+    return {
+      inboxChanged:
+        this.inbox.has(change.path) && this.inbox.markDeleted(change.path),
+      tabsChanged: tab !== undefined && !wasDeleted,
+      activeDeleted: isActive && tab !== undefined && !wasDeleted,
+      reload: false,
+    };
+  }
+
+  private applyModified(change: PathChange): {
+    inboxChanged: boolean;
+    tabsChanged: boolean;
+    activeDeleted: boolean;
+    reload: boolean;
+  } {
+    const tab = this.tabs.get(change.path);
+    const isActive = this.activePath === change.path;
+    const tracked = this.isTracked(change.path);
+
+    if (!tracked) {
       return {
-        inboxChanged: this.inbox.upsert(seed, !isActive),
+        inboxChanged: false,
         tabsChanged: false,
         activeDeleted: false,
         reload: tab !== undefined,
       };
     }
 
+    const seed: InboxSeed = {
+      path: change.path,
+      filename: fileName(change.path),
+      modifiedTime: change.modifiedTime ?? Date.now(),
+    };
+
+    // A path discovered by the watcher is new work; an existing row keeps its
+    // provenance and its review state.
+    if (!this.inbox.has(change.path)) {
+      return {
+        inboxChanged: this.inbox.addCreated({ ...seed, origin: "config" }),
+        tabsChanged: false,
+        activeDeleted: false,
+        reload: tab !== undefined && !isActive,
+      };
+    }
+
     return {
-      inboxChanged: false,
+      // The active document is on screen already: update its mtime and order
+      // without pretending the reader missed something.
+      inboxChanged: this.inbox.upsert(seed, !isActive),
       tabsChanged: false,
       activeDeleted: false,
       reload: tab !== undefined,
     };
+  }
+
+  private isTracked(path: string): boolean {
+    return this.inbox.has(path) || isUnderAny(path, this.watchRoots);
   }
 
   private async reloadDocument(path: string): Promise<void> {
@@ -621,6 +920,8 @@ class AppState {
         // Reading this tab: paint it straight away and acknowledge with the
         // brief pulse instead of the unread dot.
         tab.hasUnreadUpdate = false;
+        this.inbox.setUnread(path, false);
+        this.acknowledgeActive(path, tab.modifiedTime);
         this.flashActiveTab(path);
       } else {
         tab.hasUnreadUpdate = true;
@@ -659,8 +960,9 @@ class AppState {
     }
 
     // Reading a document acknowledges its change, which removes it from
-    // Recently Changed's unread state.
+    // Recently Changed's unread state and keeps it read after a restart.
     this.inbox.markRead(path);
+    if (tab) this.acknowledgeActive(path, tab.modifiedTime);
     this.renderSidebar();
     await this.renderActiveContent();
   }
@@ -740,6 +1042,7 @@ class AppState {
     try {
       const result = await invoke<WatchLoad>("load_watches");
       for (const root of result.roots) this.watchRoots.add(root);
+      this.reloadGeneration = result.generation;
       this.inbox.replace(result.entries.map(toSeed));
       // Explicit CLI documents are opened before the config scan. `replace`
       // clears the inventory, so put those session rows back afterwards.
@@ -762,7 +1065,24 @@ class AppState {
         truncated: result.truncated,
         loading: false,
         progress: null,
+        lastReload: {
+          at: result.at,
+          ok: result.error === null,
+          error: result.error,
+          warnings: [...result.warnings],
+          truncated: result.truncated,
+        },
       };
+
+      if (result.error === null) {
+        this.afterSuccessfulInventory(true);
+        // The active tab is on screen: never present it as missed work.
+        const active = this.activePath ? this.tabs.get(this.activePath) : undefined;
+        if (active) {
+          this.inbox.setUnread(active.path, false);
+          this.acknowledgeActive(active.path, active.modifiedTime);
+        }
+      }
     } catch (error) {
       console.error("Failed to load watch config", error);
       this.inboxStatus = {
@@ -773,6 +1093,7 @@ class AppState {
         truncated: false,
         loading: false,
         progress: null,
+        lastReload: null,
       };
     } finally {
       this.scansInFlight -= 1;
@@ -787,6 +1108,8 @@ class AppState {
       const result = await invoke<WatchAdded>("add_watch", { paths });
       for (const root of result.roots) this.watchRoots.add(root);
       this.inbox.merge(result.entries.map(toSeed));
+      if (this.inboxStatus.error === null) this.afterSuccessfulInventory(false);
+      this.applyAcknowledgementFlags();
       this.inboxStatus.warnings = [...this.inboxStatus.warnings, ...result.warnings];
     } catch (error) {
       console.error("Failed to add watch", error);
@@ -810,8 +1133,8 @@ class AppState {
         this.autoSort,
       ),
       browseMode: this.preferences.browseMode,
-      inventory: entries,
-      recent: selectRecent(entries, this.clearedAt),
+      inventory: filterEntries(entries, this.filterTerm),
+      recent: filterEntries(selectRecent(entries, this.clearedAt), this.filterTerm),
       openPaths: new Set(this.tabs.keys()),
       activePath: this.activePath,
       activeUpdatePath: this.activeUpdatePath,
@@ -819,6 +1142,7 @@ class AppState {
       openCollapsed: this.preferences.openSectionCollapsed,
       browseCollapsed: this.preferences.browseSectionCollapsed,
       canUndo: this.clearSnapshot !== null,
+      filterTerm: this.filterTerm,
       now: Date.now(),
     });
   }

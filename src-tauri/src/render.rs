@@ -41,15 +41,24 @@ pub fn should_disable_dmabuf(
 /// Applies the decision to the current process.
 ///
 /// Must run before the first window is created, because WebKitGTK latches these
-/// settings while it initialises.
+/// settings while it initialises. Only Linux runs WebKitGTK, so this is a no-op
+/// everywhere else.
 pub fn configure(argv: &[String]) {
-    let should_disable = should_disable_dmabuf(
-        argv,
-        std::env::var_os(DISABLE_DMABUF_VAR).is_some(),
-        std::env::var_os(ACCELERATED_VAR).is_some(),
-    );
+    #[cfg(target_os = "linux")]
+    {
+        let should_disable = should_disable_dmabuf(
+            argv,
+            std::env::var_os(DISABLE_DMABUF_VAR).is_some(),
+            std::env::var_os(ACCELERATED_VAR).is_some(),
+        );
 
-    if should_disable {
-        std::env::set_var(DISABLE_DMABUF_VAR, "1");
+        if should_disable {
+            std::env::set_var(DISABLE_DMABUF_VAR, "1");
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = argv;
     }
 }

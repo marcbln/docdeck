@@ -19,6 +19,124 @@ pub const MAX_ROOTS: usize = 256;
 /// Hard ceiling on inbox entries (explicit files plus scanned documents).
 pub const MAX_FILES: usize = 10_000;
 
+/// The desktop platform whose configuration convention applies.
+///
+/// A value (rather than `cfg!` at the call site) keeps path resolution pure and
+/// lets the tests assert every platform's mapping on any build machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Linux,
+    MacOs,
+    Windows,
+    Other,
+}
+
+impl Platform {
+    /// The platform this binary is running on.
+    pub fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
+        } else if cfg!(target_os = "linux") {
+            Self::Linux
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// Resolves the configuration path from an explicit platform and environment.
+///
+/// `$DOCDECK_CONFIG` always wins (tests, alternate profiles). Otherwise each
+/// platform's standard user-configuration convention applies:
+///
+/// - Linux/other Unix: `$XDG_CONFIG_HOME/docdeck/config.toml`, else
+///   `$HOME/.config/docdeck/config.toml`.
+/// - macOS: `$HOME/Library/Application Support/docdeck/config.toml`.
+/// - Windows: `%APPDATA%\docdeck\config.toml`, else
+///   `%USERPROFILE%\AppData\Roaming\docdeck\config.toml`.
+pub fn resolve_config_path(
+    platform: Platform,
+    env: &std::collections::HashMap<String, String>,
+) -> PathBuf {
+    let read = |name: &str| {
+        env.get(name)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    };
+
+    if let Some(path) = read("DOCDECK_CONFIG") {
+        return PathBuf::from(path);
+    }
+
+    let home = read("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
+
+    match platform {
+        Platform::Linux | Platform::Other => {
+            if let Some(base) = read("XDG_CONFIG_HOME") {
+                return PathBuf::from(base).join("docdeck").join("config.toml");
+            }
+            home.join(".config").join("docdeck").join("config.toml")
+        }
+        Platform::MacOs => home
+            .join("Library")
+            .join("Application Support")
+            .join("docdeck")
+            .join("config.toml"),
+        Platform::Windows => {
+            if let Some(appdata) = read("APPDATA") {
+                return PathBuf::from(appdata).join("docdeck").join("config.toml");
+            }
+            let profile = read("USERPROFILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            profile
+                .join("AppData")
+                .join("Roaming")
+                .join("docdeck")
+                .join("config.toml")
+        }
+    }
+}
+
+/// Lowercase-hex FNV-1a 64-bit hash of raw configuration bytes.
+///
+/// Used for optimistic-concurrency conflict detection when saving the config.
+/// It is deliberately not cryptographic: the goal is to notice that the file
+/// changed, not to authenticate it.
+pub fn revision_of(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Revision of the file at `path`, or `None` when it cannot be read.
+pub fn revision_of_path(path: &Path) -> Option<String> {
+    fs::read(path).ok().map(|bytes| revision_of(&bytes))
+}
+
+/// Monotonic counter shared by the startup load, the config watcher, and saves.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The next reload generation. Every applied or rejected plan carries one so
+/// the webview can discard results from a superseded pass.
+pub fn next_generation() -> u64 {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// Wall-clock milliseconds since the Unix epoch, or `0` if the clock predates
+/// it (which the tests can trigger with an injected clock elsewhere).
+pub fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// How often the tray may raise a desktop notification for detected changes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -114,18 +232,14 @@ pub struct LoadedConfig {
 }
 
 /// Where the config lives. `$DOCDECK_CONFIG` wins outright (tests, alternate
-/// profiles); otherwise XDG semantics apply.
+/// profiles); otherwise the current platform's standard convention applies.
 pub fn config_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("DOCDECK_CONFIG").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(base).join("docdeck").join("config.toml");
-    }
-    home_dir()
-        .join(".config")
-        .join("docdeck")
-        .join("config.toml")
+    let env: std::collections::HashMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| {
+            Some((key.to_str()?.to_string(), value.to_str()?.to_string()))
+        })
+        .collect();
+    resolve_config_path(Platform::current(), &env)
 }
 
 pub fn home_dir() -> PathBuf {
@@ -139,12 +253,21 @@ pub fn home_dir() -> PathBuf {
 /// first-run state the panel turns into a setup hint. Unreadable or malformed
 /// files return `Err` with a message fit for the panel.
 pub fn load(path: &Path) -> Result<LoadedConfig, String> {
+    load_with_platform(path, Platform::current())
+}
+
+/// Platform-injectable form of [`load`], so tests can prove Windows selector
+/// normalization without running on Windows.
+pub fn load_with_platform(path: &Path, platform: Platform) -> Result<LoadedConfig, String> {
     match fs::read_to_string(path) {
         Ok(raw) => toml::from_str::<WatchConfig>(&raw)
-            .map(|config| LoadedConfig {
-                path: path.to_path_buf(),
-                found: true,
-                config,
+            .map(|mut config| {
+                normalize_config_selectors(&mut config, platform);
+                LoadedConfig {
+                    path: path.to_path_buf(),
+                    found: true,
+                    config,
+                }
             })
             .map_err(|error| format!("{}: {error}", path.display())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(LoadedConfig {
@@ -153,6 +276,30 @@ pub fn load(path: &Path) -> Result<LoadedConfig, String> {
             config: WatchConfig::default(),
         }),
         Err(error) => Err(format!("{}: {error}", path.display())),
+    }
+}
+
+/// Parses and platform-normalizes a TOML document from memory.
+///
+/// Used by the editor surface, which must validate exactly what it is about to
+/// write without touching the file first.
+pub fn parse_str_with_platform(raw: &str, platform: Platform) -> Result<WatchConfig, String> {
+    toml::from_str::<WatchConfig>(raw)
+        .map(|mut config| {
+            normalize_config_selectors(&mut config, platform);
+            config
+        })
+        .map_err(|error| error.to_string())
+}
+
+/// Rewrites native selectors to the internal forward-slash form on Windows.
+/// On Unix a backslash is a literal filename character and stays untouched.
+pub fn normalize_config_selectors(config: &mut WatchConfig, platform: Platform) {
+    if platform != Platform::Windows {
+        return;
+    }
+    for selector in config.watch.iter_mut().chain(config.exclude.iter_mut()) {
+        *selector = crate::paths::normalize_selector(selector, platform);
     }
 }
 
@@ -165,12 +312,31 @@ pub fn load(path: &Path) -> Result<LoadedConfig, String> {
 /// Glob selectors walk their literal base recursively; on a selector such as
 /// `/projects/**/_ai` that walk is the expensive part of startup, so every
 /// visited entry is reported to `progress`.
+// Kept as the platform-agnostic entry point; the reload path passes an
+// explicit `Platform` so it can be tested on any build machine.
+#[allow(dead_code)]
 pub fn expand_with_limits_and_progress(
     config: &WatchConfig,
     home: &Path,
     limits: Limits,
     progress: ProgressSink<'_>,
 ) -> WatchPlan {
+    expand_with_platform(config, home, limits, Platform::current(), progress)
+}
+
+/// Platform-injectable expansion. Selectors are normalized first, so a Windows
+/// `\`-separated selector expands exactly like its forward-slash form.
+pub fn expand_with_platform(
+    config: &WatchConfig,
+    home: &Path,
+    limits: Limits,
+    platform: Platform,
+    progress: ProgressSink<'_>,
+) -> WatchPlan {
+    let mut config = config.clone();
+    normalize_config_selectors(&mut config, platform);
+    let config = &config;
+
     let mut plan = WatchPlan::default();
     let (excludes, mut warnings) = ExcludeSet::build_lenient(&config.exclude, home);
     plan.excludes = excludes;

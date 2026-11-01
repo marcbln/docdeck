@@ -71,7 +71,7 @@ impl ScanReporter {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct FilePayload {
     pub path: String,
     pub filename: String,
@@ -79,20 +79,30 @@ pub struct FilePayload {
     pub modified_time: u64,
 }
 
+/// Which source owns an inventory row. Reload reconciliation replaces `config`
+/// rows, rescans `session` rows, and never removes `manual` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    Config,
+    Session,
+}
+
 /// One inbox row: a watched file and its last modification time.
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxEntry {
     pub path: String,
     pub filename: String,
     pub modified_time: u64,
+    pub origin: Origin,
 }
 
-/// The result of loading the global config at startup.
+/// The result of loading or reloading the global config.
 ///
 /// `error` is set for an unreadable or malformed file, in which case no
 /// watches are registered. Warnings never abort the remaining selectors.
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchLoad {
     pub config_path: String,
@@ -102,6 +112,104 @@ pub struct WatchLoad {
     pub warnings: Vec<String>,
     pub error: Option<String>,
     pub truncated: bool,
+    /// Revision of the bytes that produced this plan.
+    pub revision: String,
+    /// Monotonic reload generation; older results are discarded by the webview.
+    pub generation: u64,
+    /// Unix epoch milliseconds when the plan was produced.
+    pub at: u64,
+}
+
+/// A read-only snapshot of the watch configuration file for the editor surface.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct WatchConfigView {
+    pub path: String,
+    pub found: bool,
+    pub revision: String,
+    pub watch: Vec<String>,
+    pub exclude: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// One applied configuration plan, emitted as `config-reloaded`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReloadResult {
+    pub generation: u64,
+    pub at: u64,
+    pub path: String,
+    pub found: bool,
+    pub revision: String,
+    pub watch: Vec<String>,
+    pub exclude: Vec<String>,
+    pub roots: Vec<String>,
+    pub entries: Vec<InboxEntry>,
+    pub warnings: Vec<String>,
+    pub error: Option<String>,
+    pub truncated: bool,
+}
+
+/// One precise validation message for the configuration surface.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+/// The outcome of an in-app configuration save.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[allow(dead_code)]
+pub enum SaveOutcome {
+    Applied { reload: ReloadResult },
+    Conflict { current: WatchConfigView },
+    Invalid {
+        errors: Vec<FieldError>,
+        warnings: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    IoError {
+        message: String,
+        not_writable: bool,
+    },
+}
+
+/// Error codes the webview branches on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub enum CommandErrorCode {
+    Invalid,
+    Conflict,
+    Io,
+    NotWritable,
+    Internal,
+}
+
+/// Typed command failure: never a bare string.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct CommandError {
+    pub code: CommandErrorCode,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+impl CommandError {
+    #[allow(dead_code)]
+    pub fn new(code: CommandErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+        }
+    }
 }
 
 /// The result of adding a session watch from the CLI.
@@ -114,11 +222,12 @@ pub struct WatchAdded {
 }
 
 /// Builds an inbox row, or `None` when the path vanished before the stat.
-fn entry_for(path: &Path) -> Option<InboxEntry> {
+pub(crate) fn entry_for(path: &Path, origin: Origin) -> Option<InboxEntry> {
     Some(InboxEntry {
         path: path.to_string_lossy().into_owned(),
         filename: path.file_name()?.to_string_lossy().into_owned(),
         modified_time: modified_millis(path)?,
+        origin,
     })
 }
 
@@ -237,6 +346,9 @@ pub async fn load_watches(app: AppHandle) -> WatchLoad {
             warnings: Vec::new(),
             error: Some(format!("watch scan failed: {error}")),
             truncated: false,
+            revision: String::new(),
+            generation: config::next_generation(),
+            at: config::now_millis(),
         },
     }
 }
@@ -244,128 +356,189 @@ pub async fn load_watches(app: AppHandle) -> WatchLoad {
 fn load_watches_blocking(app: &AppHandle) -> WatchLoad {
     let watcher = app.state::<WatcherState>();
     let path = config::config_path();
-    let config_path = path.to_string_lossy().into_owned();
-
-    let loaded = match config::load(&path) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            return WatchLoad {
-                config_path,
-                config_found: true,
-                roots: Vec::new(),
-                entries: Vec::new(),
-                warnings: Vec::new(),
-                error: Some(error),
-                truncated: false,
-            };
-        }
-    };
-
     let home = config::home_dir();
     let mut reporter = ScanReporter::new(app.clone());
     reporter.emit(&home);
-    let plan = config::expand_with_limits_and_progress(
-        &loaded.config,
+
+    let generation = config::next_generation();
+    let result = crate::config_watch::reconcile_config(
+        &watcher,
+        &path,
         &home,
+        crate::config::Platform::current(),
         Limits::default(),
-        &mut |path, is_dir, files| reporter.sample(path, is_dir, files),
+        generation,
+        String::new(),
+        &mut |p, is_dir, files| reporter.sample(p, is_dir, files),
     );
 
-    let mut warnings = plan.warnings;
-    let mut truncated = plan.truncated;
-    let mut entries: Vec<InboxEntry> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-
-    // Explicit file selectors first: they are cheap and must survive a root
-    // scan that hits the global cap.
-    for file in &plan.files {
-        if entries.len() >= MAX_FILES {
-            truncated = true;
-            warnings.push(format!(
-                "file limit ({MAX_FILES}) reached; remaining file selectors skipped"
-            ));
-            break;
-        }
-        if seen.insert(file.clone()) {
-            match entry_for(file) {
-                Some(entry) => entries.push(entry),
-                None => warnings.push(format!(
-                    "{} vanished before it could be listed",
-                    file.display()
-                )),
-            }
-        }
-    }
-
-    // Scan roots for Markdown, respecting the remaining global file budget.
-    for root in &plan.roots {
-        let remaining = MAX_FILES.saturating_sub(entries.len());
-        reporter.emit(root);
-        match folder::scan_markdown_with_progress(
-            root,
-            &plan.excludes,
-            remaining,
-            MAX_SCAN_ENTRIES,
-            &mut |path, is_dir, files| reporter.sample(path, is_dir, files),
-        ) {
-            Ok(outcome) => {
-                if outcome.truncated {
-                    truncated = true;
-                    warnings.push(format!(
-                        "scan of {} truncated at the {MAX_FILES} file limit",
-                        root.display()
-                    ));
-                }
-                if outcome.entries_truncated {
-                    truncated = true;
-                    warnings.push(format!(
-                        "scan of {} stopped at the {MAX_SCAN_ENTRIES} entry limit; some documents may be missing (narrow the selector or add an exclude pattern)",
-                        root.display()
-                    ));
-                }
-                warnings.extend(outcome.warnings);
-                for file in outcome.files {
-                    if seen.insert(file.clone()) {
-                        if let Some(entry) = entry_for(&file) {
-                            entries.push(entry);
-                        }
-                    }
-                }
-            }
-            Err(error) => warnings.push(error),
-        }
-    }
-
-    // Register watchers after the inventory. The exclude set must be in place
-    // before the first event can be filtered, or excluded files leak into the
-    // inbox.
-    if let Err(error) = watcher.set_excludes(plan.excludes.clone()) {
-        warnings.push(format!("could not apply exclude patterns: {error}"));
-    }
-    for root in &plan.roots {
-        if let Err(error) = watcher.watch_roots(std::slice::from_ref(root)) {
-            warnings.push(format!("could not watch {}: {error}", root.display()));
-        }
-    }
-    for file in &plan.files {
-        if let Err(error) = watcher.pin_file(file) {
-            warnings.push(format!("could not watch {}: {error}", file.display()));
-        }
-    }
-
     WatchLoad {
-        config_path: loaded.path.to_string_lossy().into_owned(),
-        config_found: loaded.found,
-        roots: plan
-            .roots
-            .iter()
-            .map(|root| root.to_string_lossy().into_owned())
-            .collect(),
-        entries,
-        warnings,
-        error: None,
-        truncated,
+        config_path: result.path,
+        config_found: result.found,
+        roots: result.roots,
+        entries: result.entries,
+        warnings: result.warnings,
+        error: result.error,
+        truncated: result.truncated,
+        revision: result.revision,
+        generation: result.generation,
+        at: result.at,
     }
+}
+
+/// Reads the watch configuration for the in-app surface.
+///
+/// Read-only: it never creates or modifies the file.
+#[tauri::command]
+pub fn read_watch_config() -> WatchConfigView {
+    crate::config_edit::read_view(&config::config_path())
+}
+
+/// Validates and saves an edited configuration, then applies it.
+///
+/// Nothing is written unless the draft is valid and the expected revision still
+/// matches the file. A successful save runs the shared reconciliation and keeps
+/// the reload generation monotonic.
+#[tauri::command]
+pub async fn save_watch_config(
+    app: AppHandle,
+    watch: Vec<String>,
+    exclude: Vec<String>,
+    expected_revision: String,
+    create_from_example: Option<bool>,
+) -> SaveOutcome {
+    let worker_app = app.clone();
+    let create_from_example = create_from_example.unwrap_or(false);
+    match tauri::async_runtime::spawn_blocking(move || {
+        save_watch_config_blocking(
+            &worker_app,
+            watch,
+            exclude,
+            expected_revision,
+            create_from_example,
+        )
+    })
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => SaveOutcome::IoError {
+            message: format!("config save failed: {error}"),
+            not_writable: false,
+        },
+    }
+}
+
+fn save_watch_config_blocking(
+    app: &AppHandle,
+    watch: Vec<String>,
+    exclude: Vec<String>,
+    expected_revision: String,
+    create_from_example: bool,
+) -> SaveOutcome {
+    let path = config::config_path();
+    let request = crate::config_edit::SaveRequest {
+        watch,
+        exclude,
+        expected_revision,
+        create_from_example,
+    };
+
+    match crate::config_edit::save(&path, &request) {
+        Ok(success) => {
+            let watcher = app.state::<WatcherState>();
+            let config_state = app.state::<crate::config_watch::ConfigWatchState>();
+            let generation = config::next_generation();
+            let reload = crate::config_watch::reconcile_config(
+                &watcher,
+                &path,
+                &config::home_dir(),
+                config::Platform::current(),
+                Limits::default(),
+                generation,
+                success.revision.clone(),
+                &mut |_, _, _| {},
+            );
+            let mut reload = reload;
+            reload.warnings.extend(success.warnings);
+            if reload.error.is_none() {
+                config_state.record_applied(&reload.revision);
+                config_state.remember_result(&reload);
+            }
+            SaveOutcome::Applied { reload }
+        }
+        Err(crate::config_edit::SaveFailure::Conflict(current)) => {
+            SaveOutcome::Conflict { current }
+        }
+        Err(crate::config_edit::SaveFailure::Invalid { errors, warnings }) => {
+            SaveOutcome::Invalid { errors, warnings }
+        }
+        Err(crate::config_edit::SaveFailure::Io {
+            message,
+            not_writable,
+        }) => SaveOutcome::IoError {
+            message,
+            not_writable,
+        },
+    }
+}
+
+/// Forces one read/expand/reconcile pass.
+///
+/// When the bytes are unchanged since the last applied plan, the cached plan is
+/// returned with a fresh generation instead of rescanning every selector.
+#[tauri::command]
+pub async fn reload_watch_config(app: AppHandle) -> ReloadResult {
+    match tauri::async_runtime::spawn_blocking(move || reload_watch_config_blocking(&app)).await {
+        Ok(result) => result,
+        Err(error) => ReloadResult {
+            generation: config::next_generation(),
+            at: config::now_millis(),
+            path: config::config_path().to_string_lossy().into_owned(),
+            found: true,
+            revision: String::new(),
+            watch: Vec::new(),
+            exclude: Vec::new(),
+            roots: Vec::new(),
+            entries: Vec::new(),
+            warnings: Vec::new(),
+            error: Some(format!("config reload failed: {error}")),
+            truncated: false,
+        },
+    }
+}
+
+fn reload_watch_config_blocking(app: &AppHandle) -> ReloadResult {
+    let path = config::config_path();
+    let config_state = app.state::<crate::config_watch::ConfigWatchState>();
+    let revision = config::revision_of_path(&path).unwrap_or_default();
+    let generation = config::next_generation();
+
+    if !config_state.revision_changed(&revision) {
+        if let Some(mut cached) = config_state.cached_result() {
+            cached.generation = generation;
+            cached.at = config::now_millis();
+            return cached;
+        }
+    }
+
+    let watcher = app.state::<WatcherState>();
+    let reload = crate::config_watch::reconcile_config(
+        &watcher,
+        &path,
+        &config::home_dir(),
+        config::Platform::current(),
+        Limits::default(),
+        generation,
+        revision,
+        &mut |_, _, _| {},
+    );
+
+    if reload.error.is_none() && reload.found {
+        config_state.record_applied(&reload.revision);
+        config_state.remember_result(&reload);
+    }
+
+    reload
 }
 
 /// Adds session watches for CLI folders and returns the documents they hold.
@@ -435,9 +608,10 @@ fn add_watch_blocking(app: &AppHandle, paths: Vec<String>) -> WatchAdded {
                 if let Err(error) = watcher.watch_roots(std::slice::from_ref(&path)) {
                     warnings.push(format!("could not watch {}: {error}", path.display()));
                 }
+                watcher.remember_paths(&outcome.files);
                 for file in outcome.files {
                     if seen.insert(file.clone()) {
-                        if let Some(entry) = entry_for(&file) {
+                        if let Some(entry) = entry_for(&file, Origin::Session) {
                             entries.push(entry);
                         }
                     }

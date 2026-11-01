@@ -146,4 +146,97 @@ mod tests {
             .excludes()
             .is_excluded(std::path::Path::new("/tmp/current/x.md")));
     }
+
+    #[test]
+    fn replace_config_watches_swaps_only_config_owned_roots() {
+        let config_root = tempdir().unwrap();
+        let session_root = tempdir().unwrap();
+        let state = WatcherState::new();
+
+        state
+            .watch_roots(std::slice::from_ref(&session_root.path().to_path_buf()))
+            .unwrap();
+        state
+            .replace_config_watches(&[config_root.path().to_path_buf()], &[])
+            .unwrap();
+
+        assert!(state
+            .watched_roots
+            .lock()
+            .unwrap()
+            .contains(config_root.path()));
+        assert!(state
+            .watched_roots
+            .lock()
+            .unwrap()
+            .contains(session_root.path()));
+
+        state.replace_config_watches(&[], &[]).unwrap();
+
+        assert!(!state
+            .watched_roots
+            .lock()
+            .unwrap()
+            .contains(config_root.path()));
+        assert!(state
+            .watched_roots
+            .lock()
+            .unwrap()
+            .contains(session_root.path()));
+    }
+
+    #[test]
+    fn replace_config_watches_keeps_session_roots_across_reloads() {
+        let root = tempdir().unwrap();
+        let state = WatcherState::new();
+        state
+            .watch_roots(std::slice::from_ref(&root.path().to_path_buf()))
+            .unwrap();
+
+        for _ in 0..3 {
+            state.replace_config_watches(&[], &[]).unwrap();
+        }
+
+        assert!(state.watched_roots.lock().unwrap().contains(root.path()));
+        assert_eq!(state.session_roots(), vec![root.path().to_path_buf()]);
+    }
+
+    #[test]
+    fn config_file_removal_does_not_drop_an_open_tab() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("open.md");
+        File::create(&file).unwrap();
+
+        let state = WatcherState::new();
+        state.watch_file(&file).unwrap();
+        state
+            .replace_config_watches(&[], std::slice::from_ref(&file))
+            .unwrap();
+        state.replace_config_watches(&[], &[]).unwrap();
+
+        // The tab still owns the watch even though the config stopped pinning it.
+        assert!(state.watched_paths.lock().unwrap().contains(&file));
+
+        state.unwatch_file(&file).unwrap();
+        assert!(!state.watched_paths.lock().unwrap().contains(&file));
+    }
+
+    #[test]
+    fn config_pins_survive_a_tab_close() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("pinned.md");
+        File::create(&file).unwrap();
+
+        let state = WatcherState::new();
+        state.watch_file(&file).unwrap();
+        state
+            .replace_config_watches(&[], std::slice::from_ref(&file))
+            .unwrap();
+        state.unwatch_file(&file).unwrap();
+
+        assert!(state.watched_paths.lock().unwrap().contains(&file));
+
+        state.replace_config_watches(&[], &[]).unwrap();
+        assert!(!state.watched_paths.lock().unwrap().contains(&file));
+    }
 }

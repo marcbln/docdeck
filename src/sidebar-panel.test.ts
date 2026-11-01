@@ -31,6 +31,7 @@ function entry(
     changedAt,
     unread: false,
     deleted: false,
+    origin: "manual",
     ...overrides,
   };
 }
@@ -52,10 +53,12 @@ function state(overrides: Partial<SidebarViewState> = {}): SidebarViewState {
       truncated: false,
       loading: false,
       progress: null,
+      lastReload: null,
     },
     openCollapsed: false,
     browseCollapsed: false,
     canUndo: false,
+    filterTerm: "",
     now: NOW,
     ...overrides,
   };
@@ -70,6 +73,7 @@ function mount(next: SidebarViewState = state()): {
   onClear: ReturnType<typeof vi.fn>;
   onUndo: ReturnType<typeof vi.fn>;
   onModeChange: ReturnType<typeof vi.fn>;
+  onFilterChange: ReturnType<typeof vi.fn>;
   onToggleSection: ReturnType<typeof vi.fn>;
 } {
   document.body.innerHTML = '<aside id="sidebar"></aside>';
@@ -80,6 +84,7 @@ function mount(next: SidebarViewState = state()): {
   const onClear = vi.fn();
   const onUndo = vi.fn();
   const onModeChange = vi.fn();
+  const onFilterChange = vi.fn();
   const onToggleSection = vi.fn();
   const panel = new SidebarPanel(root, {
     onOpen,
@@ -88,6 +93,7 @@ function mount(next: SidebarViewState = state()): {
     onClear,
     onUndo,
     onModeChange,
+    onFilterChange,
     onToggleSection,
     onContextMenu: vi.fn(),
     now: () => NOW,
@@ -104,6 +110,7 @@ function mount(next: SidebarViewState = state()): {
     onClear,
     onUndo,
     onModeChange,
+    onFilterChange,
     onToggleSection,
   };
 }
@@ -348,6 +355,7 @@ describe("SidebarPanel", () => {
           truncated: false,
           loading: false,
           progress: null,
+          lastReload: null,
         },
       }),
     );
@@ -360,5 +368,81 @@ describe("SidebarPanel", () => {
   it("releases listeners on destroy", () => {
     const { panel } = mount();
     expect(() => panel.destroy()).not.toThrow();
+  });
+
+  it("renders the last reload outcome near the config status", () => {
+    const { root } = mount(
+      state({
+        status: {
+          ...state().status,
+          lastReload: {
+            at: NOW - 5_000,
+            ok: true,
+            error: null,
+            warnings: [],
+            truncated: false,
+          },
+        },
+      }),
+    );
+
+    expect(root.querySelector(".inbox-reload")?.textContent).toContain(
+      "Configuration reloaded",
+    );
+  });
+
+  it("renders a failed reload with its error", () => {
+    const { root } = mount(
+      state({
+        status: {
+          ...state().status,
+          lastReload: {
+            at: NOW,
+            ok: false,
+            error: "expected value at line 1",
+            warnings: [],
+            truncated: false,
+          },
+        },
+      }),
+    );
+
+    expect(root.querySelector(".inbox-reload")?.textContent).toContain(
+      "Last reload failed: expected value at line 1",
+    );
+  });
+
+  it("emits filter changes and clears with Escape", () => {
+    const { root, onFilterChange } = mount();
+    const input = root.querySelector<HTMLInputElement>("#sidebar-filter-input");
+    expect(input).not.toBeNull();
+
+    input!.value = "plan";
+    input!.dispatchEvent(new Event("input"));
+    expect(onFilterChange).toHaveBeenLastCalledWith("plan");
+
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(onFilterChange).toHaveBeenLastCalledWith("");
+    expect(input!.value).toBe("");
+  });
+
+  it("shows the filtered empty state with a clear action", () => {
+    const { root, onFilterChange } = mount(
+      state({ filterTerm: "nothing", inventory: [], recent: [] }),
+    );
+
+    const empty = root.querySelector(".sidebar-browse-empty");
+    expect(empty?.textContent).toContain("No documents match “nothing”");
+
+    root.querySelector<HTMLButtonElement>(".sidebar-browse-empty .sidebar-inline-action")!.click();
+
+    expect(onFilterChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("keeps the filter input value in sync with state", () => {
+    const { root } = mount(state({ filterTerm: "alpha" }));
+    const input = root.querySelector<HTMLInputElement>("#sidebar-filter-input");
+    expect(input?.value).toBe("alpha");
   });
 });

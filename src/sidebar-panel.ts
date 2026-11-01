@@ -1,6 +1,7 @@
 import { InboxBrowser } from "./browse-modal";
 import type { InboxEntry, InboxStatus, ScanProgress } from "./inbox-model";
 import { compactPath } from "./project";
+import { formatRelativeTime } from "./relative-time";
 import { bindInboxRow, createInboxRow } from "./sidebar-rows";
 import type { BrowseMode, OpenRow } from "./sidebar-model";
 import { VirtualList } from "./virtual-list";
@@ -19,6 +20,8 @@ export interface SidebarViewState {
   openCollapsed: boolean;
   browseCollapsed: boolean;
   canUndo: boolean;
+  /** Session-only filter term; empty means the full list. */
+  filterTerm: string;
   now: number;
 }
 
@@ -30,6 +33,8 @@ export interface SidebarPanelOptions {
   onClear(): void;
   onUndo(): void;
   onModeChange(mode: BrowseMode): void;
+  /** Called whenever the browse filter changes (including clear/Escape). */
+  onFilterChange(term: string): void;
   onToggleSection(section: "open" | "browse", collapsed: boolean): void;
   onContextMenu(
     path: string,
@@ -65,6 +70,8 @@ export class SidebarPanel {
   private readonly clearBtn: HTMLButtonElement;
   private readonly undoBtn: HTMLButtonElement;
   private readonly popoutBtn: HTMLButtonElement;
+  private readonly filterInput: HTMLInputElement;
+  private readonly filterClear: HTMLButtonElement;
   private readonly statusHost: HTMLDivElement;
   private readonly browseScroll: HTMLDivElement;
   private readonly browseList: HTMLUListElement;
@@ -93,10 +100,12 @@ export class SidebarPanel {
         truncated: false,
         loading: true,
         progress: null,
+        lastReload: null,
       },
       openCollapsed: false,
       browseCollapsed: false,
       canUndo: false,
+      filterTerm: "",
       now: Date.now(),
     };
 
@@ -173,6 +182,27 @@ export class SidebarPanel {
     actions.append(this.clearBtn, this.undoBtn, this.popoutBtn);
     toolbar.append(modes, actions);
 
+    const filterRow = document.createElement("div");
+    filterRow.className = "sidebar-filter";
+    const filterLabel = document.createElement("label");
+    filterLabel.className = "sidebar-filter-label";
+    filterLabel.textContent = "Filter";
+    filterLabel.htmlFor = "sidebar-filter-input";
+    this.filterInput = document.createElement("input");
+    this.filterInput.id = "sidebar-filter-input";
+    this.filterInput.className = "sidebar-filter-input";
+    this.filterInput.type = "search";
+    this.filterInput.placeholder = "Filter by name, folder or project";
+    this.filterInput.setAttribute("aria-label", "Filter documents");
+    this.filterClear = document.createElement("button");
+    this.filterClear.type = "button";
+    this.filterClear.className = "sidebar-filter-clear";
+    this.filterClear.textContent = "×";
+    this.filterClear.setAttribute("aria-label", "Clear the document filter");
+    this.filterClear.title = "Clear the filter";
+    this.filterClear.hidden = true;
+    filterRow.append(filterLabel, this.filterInput, this.filterClear);
+
     this.statusHost = document.createElement("div");
     this.statusHost.className = "inbox-status";
 
@@ -183,7 +213,13 @@ export class SidebarPanel {
     this.browseEmpty = document.createElement("p");
     this.browseEmpty.className = "inbox-empty sidebar-browse-empty";
     this.browseScroll.append(this.browseList);
-    this.browseBody.append(toolbar, this.statusHost, this.browseScroll, this.browseEmpty);
+    this.browseBody.append(
+      toolbar,
+      filterRow,
+      this.statusHost,
+      this.browseScroll,
+      this.browseEmpty,
+    );
 
     this.browseSection.append(this.browseHeader, this.browseBody);
 
@@ -369,6 +405,23 @@ export class SidebarPanel {
       );
     });
 
+    this.filterInput.addEventListener("input", () => {
+      this.options.onFilterChange(this.filterInput.value);
+    });
+    this.filterInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (this.filterInput.value.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.filterInput.value = "";
+      this.options.onFilterChange("");
+    });
+    this.filterClear.addEventListener("click", () => {
+      this.filterInput.value = "";
+      this.options.onFilterChange("");
+      this.filterInput.focus();
+    });
+
     this.clearBtn.addEventListener("click", () => this.options.onClear());
     this.clearAllBtn.addEventListener("click", () => this.options.onCloseAll());
     this.undoBtn.addEventListener("click", () => this.options.onUndo());
@@ -381,10 +434,16 @@ export class SidebarPanel {
       now: this.options.now,
       viewportHeight: this.options.modalViewportHeight,
     });
+    const term = this.state.filterTerm.trim();
+    const emptyMessage =
+      term.length > 0
+        ? `No documents match “${term}”.`
+        : "No documents match the configured watches.";
     this.browser.open(
       this.state.inventory,
       this.state.openPaths,
       this.state.activePath,
+      emptyMessage,
     );
   }
 
@@ -468,6 +527,15 @@ export class SidebarPanel {
     this.modeAll.setAttribute("aria-pressed", String(!isRecent));
     this.modeRecent.setAttribute("aria-pressed", String(isRecent));
 
+    if (this.filterInput.value !== this.state.filterTerm) {
+      this.filterInput.value = this.state.filterTerm;
+    }
+    this.filterClear.hidden = this.state.filterTerm.trim().length === 0;
+    this.filterInput.setAttribute(
+      "aria-describedby",
+      this.state.filterTerm.trim().length === 0 ? "" : "sidebar-filter-count",
+    );
+
     this.clearBtn.disabled = !isRecent || this.state.recent.length === 0;
     this.undoBtn.disabled = !this.state.canUndo;
     this.popoutBtn.disabled = this.state.inventory.length === 0;
@@ -485,6 +553,22 @@ export class SidebarPanel {
 
     this.browseEmpty.hidden = false;
     this.browseEmpty.replaceChildren();
+
+    if (this.state.filterTerm.trim().length > 0) {
+      const text = document.createElement("span");
+      text.textContent = `No documents match “${this.state.filterTerm.trim()}”.`;
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "sidebar-inline-action";
+      clear.textContent = "Clear filter";
+      clear.addEventListener("click", () => {
+        this.filterInput.value = "";
+        this.options.onFilterChange("");
+      });
+      this.browseEmpty.append(text, clear);
+      return;
+    }
+
     if (this.state.browseMode === "recent") {
       const text = document.createElement("span");
       text.textContent = "No changes since launch.";
@@ -517,6 +601,10 @@ export class SidebarPanel {
         );
       } else if (!status.configFound) {
         fragment.append(this.setupHint(status.configPath));
+      }
+
+      if (status.lastReload) {
+        fragment.append(this.reloadMessage(status.lastReload));
       }
 
       if (status.warnings.length > 0) {
@@ -565,6 +653,25 @@ export class SidebarPanel {
 
     hint.append(message, example);
     return hint;
+  }
+
+  private reloadMessage(reload: NonNullable<InboxStatus["lastReload"]>): HTMLElement {
+    if (!reload.ok) {
+      const line = this.message(
+        `Last reload failed: ${reload.error ?? "unknown error"}`,
+        "inbox-error inbox-reload",
+      );
+      return line;
+    }
+    const when = formatRelativeTime(reload.at, this.state.now);
+    const parts = [`Configuration reloaded ${when}.`];
+    if (reload.warnings.length > 0) {
+      parts.push(
+        `${reload.warnings.length} warning${reload.warnings.length === 1 ? "" : "s"}.`,
+      );
+    }
+    if (reload.truncated) parts.push("Results were truncated.");
+    return this.message(parts.join(" "), "inbox-loading inbox-reload");
   }
 
   private warningList(warnings: string[]): HTMLElement {

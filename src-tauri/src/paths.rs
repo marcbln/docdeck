@@ -9,6 +9,8 @@ use std::time::UNIX_EPOCH;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
+use crate::config::Platform;
+
 /// A CLI argument that resolved to a real path, tagged so the frontend can
 /// branch between "open this document" and "watch this folder".
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -218,6 +220,61 @@ pub fn has_ignored_component_below(path: &Path, root: &Path) -> bool {
         }
         _ => false,
     })
+}
+
+/// Normalizes a selector before tilde expansion and glob compilation.
+///
+/// Windows accepts selectors written with native backslashes and treats them
+/// as separators, so they collapse to `/` and match the same paths as their
+/// forward-slash form. On Unix a backslash is a literal filename character and
+/// must be left alone.
+pub fn normalize_selector(selector: &str, platform: Platform) -> String {
+    if platform == Platform::Windows {
+        selector.replace('\\', "/")
+    } else {
+        selector.to_string()
+    }
+}
+
+/// A stable file identity: the volume plus the inode/file index.
+///
+/// Used only for rename pairing. `None` when the platform or filesystem cannot
+/// provide one; the caller then falls back to delete-plus-create.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileIdentity {
+    pub volume: u64,
+    pub index: u64,
+}
+
+/// Reads the file identity for `path` without reading its content.
+#[cfg(unix)]
+pub fn file_identity(path: &Path) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path).ok()?;
+    let volume = metadata.dev();
+    let index = metadata.ino();
+    if volume == 0 && index == 0 {
+        None
+    } else {
+        Some(FileIdentity { volume, index })
+    }
+}
+
+/// Reads the file identity for `path` on Windows.
+#[cfg(windows)]
+pub fn file_identity(path: &Path) -> Option<FileIdentity> {
+    use std::os::windows::fs::MetadataExt;
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(FileIdentity {
+        volume: metadata.volume_serial_number()? as u64,
+        index: metadata.file_index()?,
+    })
+}
+
+/// Platforms without a metadata identity always use the fallback behavior.
+#[cfg(not(any(unix, windows)))]
+pub fn file_identity(_path: &Path) -> Option<FileIdentity> {
+    None
 }
 
 /// Expands a leading `~` and resolves relative selectors against `home`.

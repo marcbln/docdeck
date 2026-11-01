@@ -3,6 +3,7 @@ mod tests {
     use crate::folder::{scan_markdown_with_progress, MAX_SCAN_ENTRIES};
     use crate::paths::ExcludeSet;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use std::path::Path;
     use tempfile::tempdir;
@@ -99,6 +100,7 @@ mod tests {
         assert!(outcome.files[0].ends_with("keep.md"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn skips_symlinked_directories() {
         let dir = tempdir().unwrap();

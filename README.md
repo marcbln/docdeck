@@ -13,11 +13,25 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 
 ## Features
 
-- **Config-driven watch registry** — `~/.config/docdeck/config.toml` lists
-  folders and files with wildcards (`~/devel/*/_ai`, `~/notes/**/*.md`).
-  Matching folders become recursive Markdown watches; matching files are watched
-  whatever their extension. Hidden entries, symlinks and build directories are
-  skipped; `exclude` patterns refine the set.
+- **Config-driven watch registry** — the watch configuration lists folders and
+  files with wildcards (`~/devel/*/_ai`, `~/notes/**/*.md`). Matching folders
+  become recursive Markdown watches; matching files are watched whatever their
+  extension. Hidden entries, symlinks and build directories are skipped;
+  `exclude` patterns refine the set.
+- **Live configuration reload** — editing the configuration (by hand or from the
+  in-app **Watches** surface) re-applies valid watches within a couple of
+  seconds. An invalid save keeps the last working watches and shows an
+  actionable error; open documents are never closed or reordered.
+- **Cross-session unread** — review state is recorded per document, so documents
+  changed while docdeck was closed are marked unread after a restart, while
+  reviewed and unchanged documents stay read.
+- **Browse filter** — a search field above the browse list narrows All documents
+  or Recently changed by filename, folder or `_ai` project, case-insensitively,
+  without changing order or any open/unread/deleted state.
+- **Rename and move tracking** — a rename or move inside watched locations
+  updates one row in place, keeping the document open, active and read. A move
+  out of every watch leaves the list and marks an open tab unavailable; a move
+  in appears as new unread work.
 - **Single left sidebar** — **Open documents** sits above a browsable document
   list. Open rows replace the old tab strip: activate one to switch documents,
   close it with `×`, or copy its path from the context menu. The sidebar is
@@ -28,9 +42,9 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   **Clear** empties the activity list and acknowledges its unread markers;
   **Undo** restores both. A document may appear in Open documents and Recently
   changed at the same time, because the lists answer different questions.
-- **Unread indicator** — a background document touched by an agent keeps its
-  amber pulsing dot until activated; writing to the active document pulses the
-  dot briefly and fades.
+- **Unread indicator** — a document changed since you last reviewed it keeps
+  its amber dot until activated, and the marker survives restarts; writing to
+  the active document pulses the dot briefly and fades.
 - **Panel tray icon** — a chat-style presence dot next to the window list:
   green while you are caught up, amber while detected changes are waiting to
   be seen. Left-click shows the window and clears the dot; the right-click
@@ -77,13 +91,19 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Light and dark themes** — Catppuccin Mocha and Latte, covering the app
   chrome, GitHub markdown styles, syntax highlighting and Mermaid diagrams.
 
-## Requirements (Linux)
+## Requirements
 
-- Rust 1.80+ and Node.js 20+
-- `libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`
-- `build-essential` and `pkg-config`
+- Rust 1.80+ and Node.js 20+, plus the standard Tauri 2 toolchain for your
+  platform.
 
-On Arch these come from `webkit2gtk-4.1`, `base-devel`.
+**Linux**: `libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`,
+`libjavascriptcoregtk-4.1-dev`, `build-essential` and `pkg-config`. On Arch
+these come from `webkit2gtk-4.1` and `base-devel`.
+
+**macOS**: Xcode Command Line Tools (`xcode-select --install`) and Node.js.
+
+**Windows**: the Microsoft C++ Build Tools (MSVC) and the WebView2 runtime
+(preinstalled on current Windows releases).
 
 The tray icon needs a StatusNotifierItem host in the panel (XFCE ≥ 4.18 and
 KDE ship one) and loads `libappindicator3` at runtime (`libappindicator` /
@@ -134,7 +154,16 @@ docdeck ./_ai
 
 ## Watching folders on every launch
 
-Create `~/.config/docdeck/config.toml` (`$DOCDECK_CONFIG` overrides the path):
+The configuration lives in the platform-standard user configuration directory
+(`$DOCDECK_CONFIG` overrides the path on every platform):
+
+| Platform | Default path |
+| --- | --- |
+| Linux / other Unix | `$XDG_CONFIG_HOME/docdeck/config.toml`, else `~/.config/docdeck/config.toml` |
+| macOS | `~/Library/Application Support/docdeck/config.toml` |
+| Windows | `%APPDATA%\docdeck\config.toml`, else `%USERPROFILE%\AppData\Roaming\docdeck\config.toml` |
+
+Create it with:
 
 ```toml
 watch = [
@@ -162,7 +191,13 @@ exclude = [
   `thumbnails`, `bundles`, `sitemap`, `uploads`, `storage`, `var`, `logs`,
   `__pycache__`, `htmlcov` and `*.egg-info` are always skipped. `exclude`
   globs apply on top.
-- The config is read once at startup; restart docdeck after editing it.
+- The config is live: a valid save (in-app or in your editor) is applied within
+  about two seconds, without restarting. Invalid files keep the last working
+  watches and show an error. The `Watches` header control opens an in-app editor
+  that preserves comments, formatting, `[tray]` and unknown keys.
+- Windows accepts both `/` and `\` in selectors and excludes; they are
+  normalized to one internal form. On Linux and macOS a backslash remains a
+  literal filename character.
 - Expansion is capped at 256 watched roots, 10,000 files and 100,000 visited
   entries per walk; the sidebar names any selector that was truncated. `**`
   walks are breadth-first, so shallow matches are found even when the entry cap
@@ -192,8 +227,10 @@ a new one. Documents can appear in both Open documents and Recently changed.
 
 **Clear** empties Recently changed and acknowledges the unread markers for the
 changes it covered; **Undo** restores the previous list and unread state.
-Clearing is session-scoped like unread: a restart starts with no recent
-activity. The `⤢` button opens the same inventory in a full-height modal. Both
+Recently changed is session-scoped: a restart starts with no recent activity,
+while unread markers derived from your review history persist. A filter field
+above the list narrows either mode by filename, folder or project and is
+cleared with its `×` control or `Escape`. The `⤢` button opens the same inventory in a full-height modal. Both
 the inline list and the modal keep only the visible rows in the DOM (plus a
 small overscan), so thousands of matched documents do not affect document
 switching or the first paint.
@@ -206,8 +243,10 @@ is the triage surface.
 | Control | Action |
 | --- | --- |
 | `⚡ Auto-Sort` | Order Open documents by most recently modified |
+| `👁 Watches` | Open the in-app watch configuration surface |
 | `✉ Browse` | Show or hide the lower browse section |
 | `All` / `Recently changed` | Switch the browse list's mode |
+| Filter field | Narrow the selected list; `Esc` or `×` clears it |
 | `Clear` / `Undo` | Clear recent activity and acknowledge it / restore it |
 | `⤢` | Browse the complete matched inventory in a full-height modal |
 | `☰ Outline` | Show or hide the table of contents sidebar |
@@ -267,10 +306,14 @@ reason to stderr and runs as a plain window — the tray is never fatal.
 
 Theme, outline, frontmatter, browse visibility, browse mode and the collapsed
 state of each sidebar section are stored under the `docdeck.preferences.v1` key
-in `localStorage`, so docdeck reopens the way you left it. Recently changed
-activity is session-scoped and is not persisted. Clear that key to reset to
-defaults (dark theme, outline hidden, frontmatter shown, browse shown in
-Recently changed mode, both sections expanded).
+in `localStorage`, so docdeck reopens the way you left it. Per-document review
+acknowledgements use `docdeck.acknowledgements.v1` (`{ version: 1, entries: {
+"<path>": { mtime, at } } }`); corrupt or wrong-version history is treated as a
+first launch and one bad entry never discards the rest. The browse filter,
+Recently changed activity and all session state are not persisted. Clear the
+preferences key to reset the appearance defaults (dark theme, outline hidden,
+frontmatter shown, browse shown in Recently changed mode, both sections
+expanded).
 
 ## Development
 
@@ -317,7 +360,11 @@ src/                  Frontend — document state, sidebar, markdown rendering
   preferences.ts      Versioned localStorage persistence
   project.ts          Path/components helpers: parent, project chip, compaction
   relative-time.ts    Deterministic short relative timestamps
-  inbox-model.ts      Session unread/deleted/observation state and sorted rows
+  inbox-model.ts      Inventory, origin-aware reconcile, unread/deleted state
+  acknowledgements.ts Versioned cross-session review history + unread rule
+  filter-documents.ts Pure case-insensitive name/path/project filter
+  config-editor-model.ts Pure draft, validation and conflict state
+  config-panel.ts     In-app watch configuration modal
   sidebar-model.ts    Pure Open/Recent projections, clear snapshot helpers
   sidebar-panel.ts    Two-section sidebar: Open documents and the browse list
   sidebar-rows.ts     Shared two-line row anatomy for browse surfaces
@@ -326,45 +373,45 @@ src/                  Frontend — document state, sidebar, markdown rendering
   style.css           Catppuccin Mocha + Latte, sidebar, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
-  commands.rs         load_file / close_file / load_watches / add_watch
-  config.rs           TOML parsing, selector expansion, caps and warnings
-  paths.rs            Path predicates, exclusion set, CLI classification
+  commands.rs         File/watch commands plus config read/save/reload
+  config.rs           TOML parsing, platform paths, revisions, expansion, caps
+  config_edit.rs      Comment-preserving TOML edits and atomic writes
+  config_watch.rs     Live config reload and shared reconciliation
+  paths.rs            Path predicates, identity, exclusion set, CLI classification
   folder.rs           Recursive Markdown discovery below a root
-  watcher.rs          Debounced inotify watcher, file and root registries
+  rename.rs           Pure file-identity rename pairing and move-out detection
+  watcher.rs          Debounced watcher, ownership sets, event kinds, identities
   tray.rs             Panel tray icon, presence dot compositing, notifications
   render.rs           WebKit renderer configuration
 ```
 
 The Rust side is deliberately limited to OS concerns (process IPC, filesystem
 watching, disk reads); the webview side owns all view orchestration. They meet
-only at five `invoke` commands and two events:
+only at a small set of typed `invoke` commands and events:
 
 | Direction | Name | Payload |
 | --- | --- | --- |
 | → webview | `open-path-cli` | `{ path, is_dir }` — a forwarded CLI argument |
-| → webview | `paths-changed` | `[{ path, exists, modifiedTime }]` — a batch of settled watcher events |
+| → webview | `paths-changed` | `[{ kind, path, fromPath?, exists, modifiedTime? }]` |
+| → webview | `config-reloaded` | A generation-tagged reload result |
+| → webview | `scan-progress` | Live scan path, folder and file counts |
 
-`exists` is sampled after the debounce window closed, which is all the
-classification the UI needs: reload the document, or mark its row as deleted.
-`modifiedTime` updates sidebar ordering and relative times without re-reading
-the document.
+`kind` is `created`, `modified`, `deleted`, `renamed` or `movedOut`. `exists`
+and `modifiedTime` are sampled after the debounce window closed, so the UI can
+reload a document or mark its row deleted without re-reading contents. The
+reload result is ordered by a monotonic generation; older results are ignored.
 
 ## Known limitations
 
-- **Linux only.** Relies on `inotify` and WebKitGTK.
 - **Renders markdown only.** No editing.
-- **No rename tracking.** A rename surfaces as a remove plus a create: the open
-  row keeps its content with the "deleted on disk" marker while the new path
-  appears as a bold row (no document opens automatically). (Watched *folders*
-  do survive write-to-temp-then-rename saves, which a purely per-file watch
-  could not follow.)
 - **Native find sees only the rendered browse window.** The inline browse list
   and the pop-out inventory keep just the visible rows in the DOM, so the
-  browser's find bar cannot match rows scrolled out of view. docdeck has no
-  in-app browse search.
-- **Config is read once.** Editing `config.toml` requires a restart; there is no
-  live reload or in-app editor. CLI folders are session-only — put them in the
-  config to restore them on the next launch.
+  browser's find bar cannot match rows scrolled out of view. Use the browse
+  filter (name, folder or project) instead.
+- **CLI folders are session-only.** They survive live reloads, but put them in
+  the config to restore them on the next launch.
+- **Rename pairing depends on file identity.** Where the platform cannot report
+  a stable file identity, a rename falls back to a delete plus a create.
 - **Very new directories can need one more write.** A file written into a
   directory created within the same `inotify` burst may be missed until its next
   write.
