@@ -207,6 +207,7 @@ class AppState {
         else void this.openDocument(path);
       },
       onClose: (path) => void this.closeTabPath(path),
+      onCloseAll: () => void this.closeAllTabs(),
       onClear: () => this.clearRecent(),
       onUndo: () => this.undoClear(),
       onModeChange: (mode) => this.setBrowseMode(mode),
@@ -685,6 +686,36 @@ class AppState {
       const remaining = [...this.tabs.keys()];
       this.activePath = remaining[remaining.length - 1] ?? null;
     }
+
+    this.renderSidebar();
+    await this.renderActiveContent();
+  }
+
+  /** Closes every open document in one pass, avoiding a repaint per tab. */
+  private async closeAllTabs(): Promise<void> {
+    const paths = [...this.tabs.keys()];
+    if (paths.length === 0) return;
+
+    await Promise.all(
+      paths.map((path) =>
+        invoke("close_file", { pathStr: path }).catch((error) => {
+          console.error(`Failed to release watch for ${path}`, error);
+        }),
+      ),
+    );
+
+    for (const path of paths) {
+      if (this.tabs.has(path)) this.closedTabs.record(path);
+      this.tabs.delete(path);
+      this.reloadTokens.delete(path);
+    }
+
+    if (this.activeUpdateTimer !== null) {
+      clearTimeout(this.activeUpdateTimer);
+      this.activeUpdateTimer = null;
+    }
+    this.activeUpdatePath = null;
+    this.activePath = null;
 
     this.renderSidebar();
     await this.renderActiveContent();

@@ -25,7 +25,7 @@ pub const DEBOUNCE_MS: u64 = 300;
 /// frontend how to treat the path *now*: reload it, or flag its tab as deleted.
 /// `modifiedTime` is sampled at the same moment so the inbox can update its
 /// ordering and relative time without re-reading document contents.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathChange {
     pub path: String,

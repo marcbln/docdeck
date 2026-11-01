@@ -19,6 +19,53 @@ pub const MAX_ROOTS: usize = 256;
 /// Hard ceiling on inbox entries (explicit files plus scanned documents).
 pub const MAX_FILES: usize = 10_000;
 
+/// How often the tray may raise a desktop notification for detected changes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyMode {
+    /// Never notify.
+    Off,
+    /// Notify only while the main window is not focused (the default).
+    #[default]
+    Unfocused,
+    /// Notify on every settled change batch, even with the window focused.
+    Always,
+}
+
+/// Tray icon and notification settings, read once at startup like the rest of
+/// the config.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct TrayConfig {
+    /// Whether the panel tray icon exists at all.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Desktop notification behaviour for detected changes.
+    #[serde(default)]
+    pub notify: NotifyMode,
+    /// Minimum seconds between two notifications, so agent write bursts cannot
+    /// flood the desktop.
+    #[serde(default = "default_notify_throttle_secs")]
+    pub throttle_secs: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_notify_throttle_secs() -> u64 {
+    10
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            notify: NotifyMode::default(),
+            throttle_secs: default_notify_throttle_secs(),
+        }
+    }
+}
+
 /// The parsed config file. Both keys are optional so an empty file is valid.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct WatchConfig {
@@ -26,6 +73,8 @@ pub struct WatchConfig {
     pub watch: Vec<String>,
     #[serde(default)]
     pub exclude: Vec<String>,
+    #[serde(default)]
+    pub tray: TrayConfig,
 }
 
 /// Resolved selectors, ready for scanning and watch registration.

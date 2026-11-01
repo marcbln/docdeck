@@ -25,6 +25,8 @@ export interface SidebarViewState {
 export interface SidebarPanelOptions {
   onOpen(path: string): void;
   onClose(path: string): void;
+  /** Closes every document in the Open Documents pane. */
+  onCloseAll(): void;
   onClear(): void;
   onUndo(): void;
   onModeChange(mode: BrowseMode): void;
@@ -50,6 +52,8 @@ export class SidebarPanel {
   private readonly openHeader: HTMLButtonElement;
   private readonly openCount: HTMLSpanElement;
   private readonly openBody: HTMLDivElement;
+  private readonly openToolbar: HTMLDivElement;
+  private readonly clearAllBtn: HTMLButtonElement;
   private readonly openList: HTMLUListElement;
 
   private readonly browseSection: HTMLElement;
@@ -113,10 +117,18 @@ export class SidebarPanel {
 
     this.openBody = document.createElement("div");
     this.openBody.className = "sidebar-section-body";
+    this.openToolbar = document.createElement("div");
+    this.openToolbar.className = "sidebar-open-toolbar";
+    this.clearAllBtn = this.actionButton(
+      "Clear all",
+      "Close all open documents",
+      "clear-all",
+    );
+    this.openToolbar.append(this.clearAllBtn);
     this.openList = document.createElement("ul");
     this.openList.className = "sidebar-open-list";
     this.openList.setAttribute("role", "list");
-    this.openBody.append(this.openList);
+    this.openBody.append(this.openToolbar, this.openList);
     this.openSection.append(this.openHeader, this.openBody);
 
     this.browseSection = document.createElement("section");
@@ -269,8 +281,18 @@ export class SidebarPanel {
       this.options.onOpen(path);
     });
 
-    this.openList.addEventListener("keydown", (event) => {
+    this.openList.addEventListener("auxclick", (event) => {
+      if (event.button !== 1) return;
       const row = (event.target as Element | null)?.closest<HTMLElement>(
+        ".sidebar-row",
+      );
+      const path = row?.dataset.path;
+      if (!path) return;
+      event.preventDefault();
+      this.options.onClose(path);
+    });
+
+    this.openList.addEventListener("keydown", (event) => {      const row = (event.target as Element | null)?.closest<HTMLElement>(
         ".sidebar-row",
       );
       const path = row?.dataset.path;
@@ -348,6 +370,7 @@ export class SidebarPanel {
     });
 
     this.clearBtn.addEventListener("click", () => this.options.onClear());
+    this.clearAllBtn.addEventListener("click", () => this.options.onCloseAll());
     this.undoBtn.addEventListener("click", () => this.options.onUndo());
     this.popoutBtn.addEventListener("click", () => this.openPopout());
   }
@@ -373,6 +396,8 @@ export class SidebarPanel {
     );
     this.openSection.classList.toggle("collapsed", this.state.openCollapsed);
     this.openBody.hidden = this.state.openCollapsed;
+    this.openToolbar.hidden = this.state.openRows.length === 0;
+    this.clearAllBtn.disabled = this.state.openRows.length === 0;
 
     const fragment = document.createDocumentFragment();
     if (this.state.openRows.length === 0) {

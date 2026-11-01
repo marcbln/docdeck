@@ -31,6 +31,12 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Unread indicator** — a background document touched by an agent keeps its
   amber pulsing dot until activated; writing to the active document pulses the
   dot briefly and fades.
+- **Panel tray icon** — a chat-style presence dot next to the window list:
+  green while you are caught up, amber while detected changes are waiting to
+  be seen. Left-click shows the window and clears the dot; the right-click
+  menu offers Show, a notifications toggle and Quit. Optional desktop
+  notifications announce settled changes and are configurable and throttled
+  so a burst of agent writes cannot flood the desktop.
 - **Auto-sort by last update** — bump the documents an agent just touched to the
   top of Open documents.
 - **Copy a document's path** — right-click any row (or press `Shift+F10` / the
@@ -78,6 +84,11 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - `build-essential` and `pkg-config`
 
 On Arch these come from `webkit2gtk-4.1`, `base-devel`.
+
+The tray icon needs a StatusNotifierItem host in the panel (XFCE ≥ 4.18 and
+KDE ship one) and loads `libappindicator3` at runtime (`libappindicator` /
+`libayatana-appindicator` on Arch); without either, the app runs as a plain
+window and prints why to stderr.
 
 ## Build
 
@@ -135,6 +146,11 @@ exclude = [
   "**/archive/**",
   "**/templates/**",
 ]
+
+# [tray]                        # panel tray icon (all keys optional)
+# enabled = true                # set false to hide the tray entirely
+# notify = "unfocused"          # "off" | "unfocused" | "always"
+# throttle_secs = 10            # minimum gap between notifications
 ```
 
 - `~` expands to your home directory; `*` matches one path segment; `**`
@@ -215,6 +231,38 @@ is the triage surface.
 | `×` on an open row | Close it and release its file watch (watched folders stay live) |
 | `Ctrl+Shift+T` / `Cmd+Shift+T` | Reopen the most recently closed document |
 
+### Tray icon and notifications
+
+docdeck lives in the panel tray (XFCE's System Tray plugin, KDE, or any other
+StatusNotifierItem host) with a chat-style presence dot:
+
+| Dot | Meaning |
+| --- | --- |
+| 🟢 green | Watching; nothing waiting for you |
+| 🟠 amber | Changes settled while the window was not focused |
+
+The amber dot clears as soon as the window regains focus (or when you click
+the tray icon). Left-click shows and focuses the window; right-click opens a
+menu with **Show docdeck**, **Notify on changes** (toggles notifications for
+this session, starting from the configured mode) and **Quit docdeck**.
+
+Notifications fire when a debounced batch of changes settles, with the names
+of up to three files plus a `+N more` summary. What counts as "fire" is the
+`[tray]` section in `~/.config/docdeck/config.toml` — read once at startup
+like the rest of the config:
+
+- `notify = "off"` — dot only, never a popup.
+- `notify = "unfocused"` (default) — popups only while the window is not
+  focused, so watching a document live never interrupts you.
+- `notify = "always"` — every batch notifies.
+- `throttle_secs` — minimum seconds between two popups regardless of mode
+  (default 10); bursts of agent writes raise one notification, not twenty.
+- `enabled = false` — no tray icon at all.
+
+On XFCE the dot shows in the standard System Tray plugin (4.18+ supports
+StatusNotifierItem natively). If no tray host is reachable, docdeck logs the
+reason to stderr and runs as a plain window — the tray is never fatal.
+
 ### Preferences
 
 Theme, outline, frontmatter, browse visibility, browse mode and the collapsed
@@ -283,6 +331,7 @@ src-tauri/src/
   paths.rs            Path predicates, exclusion set, CLI classification
   folder.rs           Recursive Markdown discovery below a root
   watcher.rs          Debounced inotify watcher, file and root registries
+  tray.rs             Panel tray icon, presence dot compositing, notifications
   render.rs           WebKit renderer configuration
 ```
 

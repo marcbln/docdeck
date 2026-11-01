@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{expand_with_limits_and_progress, load, Limits, WatchConfig};
+    use crate::config::{expand_with_limits_and_progress, load, Limits, NotifyMode, WatchConfig};
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
@@ -10,6 +10,7 @@ mod tests {
         WatchConfig {
             watch: watch.iter().map(|value| value.to_string()).collect(),
             exclude: exclude.iter().map(|value| value.to_string()).collect(),
+            ..Default::default()
         }
     }
 
@@ -71,6 +72,46 @@ mod tests {
 
         let error = load(&path).unwrap_err();
         assert!(error.contains("config.toml"), "error was: {error}");
+    }
+
+    #[test]
+    fn tray_section_defaults_when_absent() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "watch = [\"~/notes\"]\n").unwrap();
+
+        let loaded = load(&path).unwrap();
+        assert!(loaded.config.tray.enabled);
+        assert_eq!(loaded.config.tray.notify, NotifyMode::Unfocused);
+        assert_eq!(loaded.config.tray.throttle_secs, 10);
+    }
+
+    #[test]
+    fn tray_section_parses_all_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "[tray]\nenabled = false\nnotify = \"always\"\nthrottle_secs = 30\n",
+        )
+        .unwrap();
+
+        let loaded = load(&path).unwrap();
+        assert!(!loaded.config.tray.enabled);
+        assert_eq!(loaded.config.tray.notify, NotifyMode::Always);
+        assert_eq!(loaded.config.tray.throttle_secs, 30);
+    }
+
+    #[test]
+    fn tray_section_accepts_partial_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[tray]\nnotify = \"off\"\n").unwrap();
+
+        let loaded = load(&path).unwrap();
+        assert!(loaded.config.tray.enabled);
+        assert_eq!(loaded.config.tray.notify, NotifyMode::Off);
+        assert_eq!(loaded.config.tray.throttle_secs, 10);
     }
 
     // -- expansion -----------------------------------------------------------

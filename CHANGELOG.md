@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Panel tray icon with a chat-style presence dot: green while caught up, amber
+  while detected changes are unread; the dot clears when the window regains
+  focus. Left-click shows and focuses the window, right-click offers Show, a
+  per-session notification toggle and Quit. Optional desktop notifications
+  name up to three changed files per batch and are configurable via a new
+  `[tray]` section in `config.toml` (`enabled`, `notify = "off" |
+  "unfocused" | "always"`, `throttle_secs`) so notification bursts cannot
+  flood the desktop.
 - Reopen closed tabs with `Ctrl+Shift+T` (`Cmd+Shift+T` on macOS), browser
   style. The session keeps the 25 most recently closed documents and repeated
   presses walk back through them; reopening a path manually clears its stale

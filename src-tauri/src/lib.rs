@@ -7,6 +7,7 @@ mod folder;
 mod navigation;
 mod paths;
 mod render;
+mod tray;
 mod watcher;
 
 #[cfg(test)]
@@ -19,6 +20,8 @@ mod navigation_test;
 mod paths_test;
 #[cfg(test)]
 mod render_test;
+#[cfg(test)]
+mod tray_test;
 #[cfg(test)]
 mod watcher_test;
 
@@ -79,12 +82,34 @@ pub fn run() {
 
     builder = builder.plugin(navigation_guard());
 
+    builder = builder.plugin(tauri_plugin_notification::init());
+
     builder
         .manage(watcher_state)
+        .on_window_event(|window, event| {
+            // Regaining focus means the user has seen the changes: retire the
+            // unread dot. The tray may be disabled, so this is best-effort.
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                if let Some(manager) = window.try_state::<std::sync::Arc<tray::TrayManager>>() {
+                    manager.set_presence(tray::Presence::Current);
+                }
+            }
+        })
         .setup(|app| {
             app.state::<WatcherState>()
                 .init(app.handle().clone())
                 .map_err(io::Error::other)?;
+            // The tray re-reads the config file itself; a malformed config is
+            // already surfaced by the sidebar panel, so the tray falls back to
+            // its defaults rather than duplicating the error.
+            let tray_config = config::load(&config::config_path())
+                .map(|loaded| loaded.config.tray)
+                .unwrap_or_default();
+            if tray_config.enabled {
+                if let Err(error) = tray::setup(app, tray_config) {
+                    eprintln!("[docdeck] tray unavailable: {error}");
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

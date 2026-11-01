@@ -188,6 +188,7 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .sidebar-section-body--browse {
@@ -204,6 +205,16 @@ body {
   list-style: none;
   margin: 0;
   padding: 0 0 6px;
+}
+
+.sidebar-open-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 6px;
+}
+
+.sidebar-open-toolbar[hidden] {
+  display: none;
 }
 
 .sidebar-open-empty,
@@ -230,7 +241,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
+  padding: 7px 20px 7px 12px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 13px;
@@ -267,7 +278,7 @@ body {
 
 .sidebar-row-close {
   flex: 0 0 auto;
-  padding: 0 2px;
+  padding: 2px 4px;
   opacity: 0.6;
   font-weight: bold;
   line-height: 1;

@@ -66,6 +66,7 @@ function mount(next: SidebarViewState = state()): {
   panel: SidebarPanel;
   onOpen: ReturnType<typeof vi.fn>;
   onClose: ReturnType<typeof vi.fn>;
+  onCloseAll: ReturnType<typeof vi.fn>;
   onClear: ReturnType<typeof vi.fn>;
   onUndo: ReturnType<typeof vi.fn>;
   onModeChange: ReturnType<typeof vi.fn>;
@@ -75,6 +76,7 @@ function mount(next: SidebarViewState = state()): {
   const root = document.getElementById("sidebar") as HTMLElement;
   const onOpen = vi.fn();
   const onClose = vi.fn();
+  const onCloseAll = vi.fn();
   const onClear = vi.fn();
   const onUndo = vi.fn();
   const onModeChange = vi.fn();
@@ -82,6 +84,7 @@ function mount(next: SidebarViewState = state()): {
   const panel = new SidebarPanel(root, {
     onOpen,
     onClose,
+    onCloseAll,
     onClear,
     onUndo,
     onModeChange,
@@ -97,6 +100,7 @@ function mount(next: SidebarViewState = state()): {
     panel,
     onOpen,
     onClose,
+    onCloseAll,
     onClear,
     onUndo,
     onModeChange,
@@ -161,6 +165,44 @@ describe("SidebarPanel", () => {
     (row.querySelector(".sidebar-row-close") as HTMLElement).click();
     expect(onClose).toHaveBeenCalledWith("/a/plan.md");
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes a row on middle-click", () => {
+    const { root, onClose, onOpen } = mount(
+      state({ openRows: [openRow("/a/plan.md")] }),
+    );
+    const row = root.querySelector<HTMLElement>(".sidebar-row")!;
+
+    row.dispatchEvent(
+      new MouseEvent("auxclick", { button: 1, bubbles: true }),
+    );
+
+    expect(onClose).toHaveBeenCalledWith("/a/plan.md");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("closes every open document from the pane's clear-all control", () => {
+    const { root, onCloseAll } = mount(
+      state({ openRows: [openRow("/a/one.md"), openRow("/a/two.md")] }),
+    );
+    const clearAll = root.querySelector<HTMLButtonElement>(
+      ".sidebar-action[data-action='clear-all']",
+    )!;
+
+    expect(clearAll.disabled).toBe(false);
+    clearAll.click();
+    expect(onCloseAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides clear-all when no document is open", () => {
+    const { root } = mount();
+    const toolbar = root.querySelector<HTMLElement>(".sidebar-open-toolbar")!;
+    const clearAll = toolbar.querySelector<HTMLButtonElement>(
+      ".sidebar-action[data-action='clear-all']",
+    )!;
+
+    expect(toolbar.hidden).toBe(true);
+    expect(clearAll.disabled).toBe(true);
   });
 
   it("activates a focused row with Enter", () => {
