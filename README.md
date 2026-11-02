@@ -129,6 +129,14 @@ The binary lands at `src-tauri/target/release/docdeck`. Put it on your `PATH`:
 sudo install -m 755 src-tauri/target/release/docdeck /usr/local/bin/docdeck
 ```
 
+Or use the installer, which also registers docdeck as an "Open With" handler
+for Markdown files (Linux):
+
+```bash
+npm run install:bin            # build and install to ~/.local/bin
+./scripts/install.sh --default # additionally set it as the default .md handler
+```
+
 ### Install as a system package
 
 ```bash

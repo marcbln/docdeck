@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Linux desktop integration in `scripts/install.sh`: installs a
+  `docdeck.desktop` entry and icons and registers `text/markdown` /
+  `text/x-markdown`, so docdeck appears under "Open With" in file managers.
+  `--default` additionally makes it the default Markdown handler;
+  `--no-desktop` skips the registration.
 - Live watch-configuration reload: a valid save from the in-app surface or a
   hand edit re-applies selectors and excludes within about two seconds, without
   restarting, closing tabs or changing the active document. Invalid or
