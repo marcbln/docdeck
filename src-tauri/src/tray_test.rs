@@ -30,25 +30,33 @@ mod tests {
 
     #[test]
     fn dot_is_painted_with_the_presence_color() {
-        // Radius mirrors the production math: round(32 * 0.30) = 10, center at
-        // (32 - 10 - 2 - 1) = (19, 19).
+        // Radius mirrors the production math: round(32 * 0.20) = 6, center at
+        // (32 - 6 - 2 - 1) = (23, 23).
         let composed = compose_presence_icon(&base_icon(), Presence::Current);
         let [r, g, b] = Presence::Current.rgb();
-        assert_eq!(composed.get_pixel(19, 19).0, [r, g, b, 255]);
+        assert_eq!(composed.get_pixel(23, 23).0, [r, g, b, 255]);
     }
 
     #[test]
     fn unread_and_current_differ() {
         let current = compose_presence_icon(&base_icon(), Presence::Current);
         let unread = compose_presence_icon(&base_icon(), Presence::Unread);
-        assert_ne!(current.get_pixel(19, 19).0, unread.get_pixel(19, 19).0);
+        assert_ne!(current.get_pixel(23, 23).0, unread.get_pixel(23, 23).0);
     }
 
     #[test]
     fn ring_separates_dot_from_base_icon() {
         let composed = compose_presence_icon(&base_icon(), Presence::Current);
-        // One pixel past the dot radius (10) but inside the ring (+2).
-        assert_eq!(composed.get_pixel(19, 19 + 11).0, [24, 26, 30, 255]);
+        // One pixel past the dot radius (6) but inside the ring (+2).
+        assert_eq!(composed.get_pixel(23, 23 + 7).0, [24, 26, 30, 255]);
+    }
+
+    #[test]
+    fn dot_stays_a_corner_badge() {
+        // The dot must not bleed into the middle of the logo at panel sizes,
+        // which is what made the icon read as overlapping big circles.
+        let composed = compose_presence_icon(&base_icon(), Presence::Unread);
+        assert_eq!(composed.get_pixel(16, 16).0, [255, 0, 255, 255]);
     }
 
     #[test]
@@ -61,7 +69,7 @@ mod tests {
     fn compositing_keeps_the_base_untouched() {
         let base = base_icon();
         let _ = compose_presence_icon(&base, Presence::Unread);
-        assert_eq!(base.get_pixel(19, 19).0, [255, 0, 255, 255]);
+        assert_eq!(base.get_pixel(23, 23).0, [255, 0, 255, 255]);
     }
 
     // -- notification decision --------------------------------------------------

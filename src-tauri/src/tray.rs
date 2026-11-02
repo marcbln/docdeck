@@ -20,8 +20,9 @@ use crate::watcher::PathChange;
 /// Base tray icon, before any presence dot is painted on it.
 const BASE_ICON_PNG: &[u8] = include_bytes!("../icons/32x32.png");
 
-/// Dot radius as a fraction of the icon size.
-const DOT_RADIUS_FRACTION: f32 = 0.30;
+/// Dot radius as a fraction of the icon size. Kept small so the dot reads as a
+/// corner badge instead of swallowing the logo at panel sizes.
+const DOT_RADIUS_FRACTION: f32 = 0.20;
 /// Dark ring around the dot so it stays visible on any base icon.
 const RING_PX: i64 = 2;
 /// Files named in one notification; the rest are summarized as "+N more".
