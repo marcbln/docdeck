@@ -102,14 +102,16 @@ if [[ $DESKTOP -eq 1 && "$(uname -s)" == "Linux" ]]; then
   BIN_EXEC="$(cd "$(dirname "$BIN_DST")" && pwd)/$(basename "$BIN_DST")"
 
   mkdir -p "$APPS_DIR"
-  if [[ -f src-tauri/icons/128x128@2x.png ]]; then
-    mkdir -p "$ICON_HOME/256x256/apps"
-    install -m 0644 src-tauri/icons/128x128@2x.png "$ICON_HOME/256x256/apps/docdeck.png"
-  fi
-  if [[ -f src-tauri/icons/128x128.png ]]; then
-    mkdir -p "$ICON_HOME/128x128/apps"
-    install -m 0644 src-tauri/icons/128x128.png "$ICON_HOME/128x128/apps/docdeck.png"
-  fi
+  install_icon() {
+    local size="$1" source="$2"
+    [[ -f "$source" ]] || return 0
+    mkdir -p "$ICON_HOME/${size}x${size}/apps"
+    install -m 0644 "$source" "$ICON_HOME/${size}x${size}/apps/docdeck.png"
+  }
+  install_icon 32 src-tauri/icons/32x32.png
+  install_icon 128 src-tauri/icons/128x128.png
+  install_icon 256 src-tauri/icons/128x128@2x.png
+  install_icon 512 src-tauri/icons/icon.png
 
   DESKTOP_FILE="$APPS_DIR/docdeck.desktop"
   cat > "$DESKTOP_FILE" <<EOF
@@ -125,6 +127,16 @@ MimeType=text/markdown;text/x-markdown;
 StartupNotify=true
 EOF
   chmod 0644 "$DESKTOP_FILE"
+
+  # Rebuild the caches. Without this a desktop keeps using a stale icon theme
+  # cache (generic icon) and may not notice the new desktop entry.
+  command -v gtk-update-icon-cache >/dev/null &&
+    gtk-update-icon-cache -f -t "$ICON_HOME" >/dev/null 2>&1 || true
+  if command -v kbuildsycoca6 >/dev/null; then
+    kbuildsycoca6 >/dev/null 2>&1 || true
+  elif command -v kbuildsycoca5 >/dev/null; then
+    kbuildsycoca5 >/dev/null 2>&1 || true
+  fi
 
   command -v update-desktop-database >/dev/null &&
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
