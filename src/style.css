@@ -138,13 +138,17 @@ body {
 }
 
 .sidebar-section--open {
-  flex: 0 1 auto;
+  /* Never shrink: the browse list can hold thousands of rows, and its intrinsic
+     height must not collapse this section to zero (which let it overlap Browse). */
+  flex: 0 0 auto;
   max-height: 45%;
   border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-section--browse {
-  flex: 1 1 auto;
+  /* A zero flex-basis keeps the browse section sized by the space left over
+     instead of the full (possibly huge) inventory height. */
+  flex: 1 1 0;
 }
 
 .sidebar-section-header {
