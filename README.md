@@ -286,8 +286,10 @@ menu with **Show docdeck**, **Notify on changes** (toggles notifications for
 this session, starting from the configured mode) and **Quit docdeck**.
 
 Notifications fire when a debounced batch of changes settles, with the names
-of up to three files plus a `+N more` summary. What counts as "fire" is the
-`[tray]` section in `~/.config/docdeck/config.toml` — read once at startup
+of up to three files plus a `+N more` summary. Files under an `_ai` workspace
+carry their project chip (`skillman: plan.md`), matching the inbox rows. What
+counts as "fire" is the `[tray]` section in `~/.config/docdeck/config.toml` —
+read once at startup
 like the rest of the config:
 
 - `notify = "off"` — dot only, never a popup.

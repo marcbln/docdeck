@@ -97,8 +97,37 @@ pub fn should_notify(
     }
 }
 
+/// The project a path belongs to: the component directly above the deepest
+/// `_ai` segment, mirroring the inbox chip. `None` when no component precedes
+/// `_ai`, so labels such as `devel` never leak into a notification.
+pub fn project_name(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    let windows = drive || (path.contains('\\') && !path.contains('/')) || path.starts_with("\\\\");
+    let normalized = if windows {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
+    let parts: Vec<&str> = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let deepest = (0..parts.len().saturating_sub(1))
+        .rev()
+        .find(|&index| parts[index] == "_ai")?;
+    if deepest == 0 {
+        return None;
+    }
+    Some(parts[deepest - 1].to_string())
+}
+
 /// Body text naming the changed documents, capped so one agent burst does not
-/// become a novel.
+/// become a novel. Paths under an `_ai` workspace carry their project chip,
+/// matching the inbox rows.
 pub fn notification_body(changes: &[PathChange], max_files: usize) -> String {
     let present: Vec<&PathChange> = changes.iter().filter(|change| change.exists).collect();
     let listed: Vec<String> = present
@@ -106,9 +135,14 @@ pub fn notification_body(changes: &[PathChange], max_files: usize) -> String {
         .take(max_files)
         .map(|change| {
             let path = std::path::Path::new(&change.path);
-            path.file_name()
+            let name = path
+                .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| change.path.clone())
+                .unwrap_or_else(|| change.path.clone());
+            match project_name(&change.path) {
+                Some(project) => format!("{project}: {name}"),
+                None => name,
+            }
         })
         .collect();
 

@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::config::NotifyMode;
-    use crate::tray::{compose_presence_icon, notification_body, should_notify, Presence};
+    use crate::tray::{
+        compose_presence_icon, notification_body, project_name, should_notify, Presence,
+    };
     use crate::watcher::{PathChange, PathChangeKind};
     use image::RgbaImage;
     use std::time::{Duration, Instant};
@@ -133,12 +135,63 @@ mod tests {
         ));
     }
 
+    // -- project chip ------------------------------------------------------------
+
+    #[test]
+    fn project_is_the_component_above_the_deepest_ai_segment() {
+        assert_eq!(
+            project_name("/home/u/devel/docdeck/_ai/backlog/plan.md"),
+            Some("docdeck".to_string())
+        );
+        assert_eq!(
+            project_name("/home/u/devel/x/_ai/notes/_ai/z.md"),
+            Some("notes".to_string())
+        );
+    }
+
+    #[test]
+    fn no_project_without_an_ai_component() {
+        assert_eq!(project_name("/home/u/notes/plan.md"), None);
+        assert_eq!(project_name("_ai/plan.md"), None);
+        assert_eq!(project_name("/home/u/weird\\name.md"), None);
+    }
+
+    #[test]
+    fn windows_paths_find_the_project_too() {
+        assert_eq!(
+            project_name("C:\\devel\\docdeck\\_ai\\backlog\\plan.md"),
+            Some("docdeck".to_string())
+        );
+    }
+
     // -- notification body -------------------------------------------------------
 
     #[test]
     fn single_change_names_the_file() {
         let body = notification_body(&[change("/x/plan.md", true)], 3);
         assert_eq!(body, "plan.md changed");
+    }
+
+    #[test]
+    fn project_chip_prefixes_the_file_name() {
+        let body = notification_body(
+            &[change("/home/u/devel/skillman/_ai/backlog/plan.md", true)],
+            3,
+        );
+        assert_eq!(body, "skillman: plan.md changed");
+    }
+
+    #[test]
+    fn mixed_batches_keep_each_project_chip() {
+        let body = notification_body(
+            &[
+                change("/home/u/devel/alpha/_ai/a.md", true),
+                change("/home/u/devel/beta/_ai/b.md", true),
+                change("/home/u/settings.md", true),
+            ],
+            3,
+        );
+        assert_eq!(body, "alpha: a.md, beta: b.md, settings.md changed");
     }
 
     #[test]

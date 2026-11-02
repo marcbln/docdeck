@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while detected changes are unread; the dot clears when the window regains
   focus. Left-click shows and focuses the window, right-click offers Show, a
   per-session notification toggle and Quit. Optional desktop notifications
-  name up to three changed files per batch and are configurable via a new
+  name up to three changed files per batch, prefixed with the `_ai` project
+  chip just like inbox rows, and are configurable via a new
   `[tray]` section in `config.toml` (`enabled`, `notify = "off" |
   "unfocused" | "always"`, `throttle_secs`) so notification bursts cannot
   flood the desktop.
