@@ -19,6 +19,7 @@ changed decision is a new ADR that supersedes the old one.
 | [261024-4](ADR__261024-4__inline-pan-zoom-for-mermaid-diagrams.md) | Inline pan/zoom for Mermaid diagrams with source-keyed view state | Accepted | 2026-10-24 |
 | [261029-1](ADR__261029-1__block-webview-navigation-and-dispatch-links-explicitly.md) | Block webview navigation and dispatch document links explicitly | Accepted | 2026-10-29 |
 | [261101-1](ADR__261101-1__file-identity-renames-and-persisted-acknowledgements.md) | File-identity rename pairing and persisted review acknowledgements | Accepted | 2026-11-01 |
+| [261103-1](ADR__261103-1__upgrade-restart-via-instance-state-and-quit-channel.md) | Upgrade restarts use a runtime instance file and a `--quit` control channel | Accepted | 2026-11-03 |
 
 ## Format
 
