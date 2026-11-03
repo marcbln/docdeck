@@ -27,6 +27,7 @@ function recent(path: string, changedAt: number, overrides: Partial<InboxEntry> 
     changedAt,
     unread: true,
     deleted: false,
+    inventoryHidden: false,
     origin: "manual",
     ...overrides,
   };

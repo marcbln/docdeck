@@ -295,7 +295,10 @@ changes it covered; **Undo** restores the previous list and unread state.
 Recently changed is session-scoped: a restart starts with no recent activity,
 while unread markers derived from your review history persist. A filter field
 above the list narrows either mode by filename, folder or project and is
-cleared with its `×` control or `Escape`. The `⤢` button opens the same inventory in a full-height modal. Both
+cleared with its `×` control or `Escape`. Middle-click a row to dismiss it from
+the list on screen: a Recently changed row is acknowledged and returns only if
+the document changes again, while an All documents row is hidden for the
+session until then. The `⤢` button opens the same inventory in a full-height modal. Both
 the inline list and the modal keep only the visible rows in the DOM (plus a
 small overscan), so thousands of matched documents do not affect document
 switching or the first paint.
@@ -312,6 +315,7 @@ is the triage surface.
 | `✉ Browse` | Show or hide the lower browse section |
 | `All` / `Recently changed` | Switch the browse list's mode |
 | Filter field | Narrow the selected list; `Esc` or `×` clears it |
+| Middle-click a browse row | Dismiss it from the list on screen |
 | `Clear` / `Undo` | Clear recent activity and acknowledge it / restore it |
 | `✨` | Summarize the current Recently changed rows with the configured agent |
 | `⤢` | Browse the complete matched inventory in a full-height modal |

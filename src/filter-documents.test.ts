@@ -11,6 +11,7 @@ function entry(path: string): InboxEntry {
     changedAt: 0,
     unread: false,
     deleted: false,
+    inventoryHidden: false,
     origin: "config",
   };
 }

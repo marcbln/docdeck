@@ -15,6 +15,7 @@ function entry(index: number): InboxEntry {
     changedAt: NOW - index * 1_000,
     unread: false,
     deleted: false,
+    inventoryHidden: false,
     origin: "manual",
   };
 }

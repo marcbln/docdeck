@@ -31,6 +31,7 @@ function entry(
     changedAt,
     unread: false,
     deleted: false,
+    inventoryHidden: false,
     origin: "manual",
     ...overrides,
   };
@@ -81,6 +82,7 @@ function mount(next: SidebarViewState = state()): {
   onClear: ReturnType<typeof vi.fn>;
   onUndo: ReturnType<typeof vi.fn>;
   onSummarize: ReturnType<typeof vi.fn>;
+  onDismiss: ReturnType<typeof vi.fn>;
   onModeChange: ReturnType<typeof vi.fn>;
   onFilterChange: ReturnType<typeof vi.fn>;
   onToggleSection: ReturnType<typeof vi.fn>;
@@ -93,12 +95,14 @@ function mount(next: SidebarViewState = state()): {
   const onClear = vi.fn();
   const onUndo = vi.fn();
   const onSummarize = vi.fn();
+  const onDismiss = vi.fn();
   const onModeChange = vi.fn();
   const onFilterChange = vi.fn();
   const onToggleSection = vi.fn();
   const panel = new SidebarPanel(root, {
     onOpen,
     onClose,
+    onDismiss,
     onCloseAll,
     onClear,
     onUndo,
@@ -117,6 +121,7 @@ function mount(next: SidebarViewState = state()): {
     panel,
     onOpen,
     onClose,
+    onDismiss,
     onCloseAll,
     onClear,
     onUndo,
@@ -198,6 +203,36 @@ describe("SidebarPanel", () => {
 
     expect(onClose).toHaveBeenCalledWith("/a/plan.md");
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("dismisses a browse row on middle-click without opening it", () => {
+    const { root, onDismiss, onOpen } = mount(
+      state({ browseMode: "recent", recent: [entry("/a/new.md", NOW)] }),
+    );
+    const row = root.querySelector<HTMLElement>(".inbox-row")!;
+
+    row.dispatchEvent(
+      new MouseEvent("auxclick", { button: 1, bubbles: true }),
+    );
+
+    expect(onDismiss).toHaveBeenCalledWith("/a/new.md", "recent");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("reports the visible browse mode when dismissing", () => {
+    const { root, onDismiss } = mount(
+      state({
+        browseMode: "all",
+        inventory: [entry("/a/one.md", NOW)],
+      }),
+    );
+    const row = root.querySelector<HTMLElement>(".inbox-row")!;
+
+    row.dispatchEvent(
+      new MouseEvent("auxclick", { button: 1, bubbles: true }),
+    );
+
+    expect(onDismiss).toHaveBeenCalledWith("/a/one.md", "all");
   });
 
   it("closes every open document from the pane's clear-all control", () => {

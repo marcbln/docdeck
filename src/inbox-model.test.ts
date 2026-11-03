@@ -312,4 +312,46 @@ describe("InboxModel", () => {
       changedAt: 2_000,
       deleted: false,
     });
-  });});
+  });
+
+  it("dismisses one recent row and brings it back on the next change", () => {
+    const { model: inbox, set } = clocked(1_000);
+    inbox.upsert(seed("/a/one.md", 1_000));
+    inbox.upsert(seed("/a/two.md", 1_000));
+
+    expect(inbox.dismissRecent("/a/one.md")).toBe(true);
+    expect(inbox.get("/a/one.md")).toMatchObject({
+      changedAt: 0,
+      unread: false,
+    });
+    expect(inbox.get("/a/two.md")?.changedAt).toBe(1_000);
+    expect(inbox.dismissRecent("/a/one.md")).toBe(false);
+
+    set(2_000);
+    expect(inbox.upsert(seed("/a/one.md", 2_000))).toBe(true);
+    expect(inbox.get("/a/one.md")?.changedAt).toBe(2_000);
+  });
+
+  it("hides one inventory row until the document changes again", () => {
+    const inbox = new InboxModel();
+    inbox.replace([seed("/a/one.md", 1_000), seed("/a/two.md", 1_000)]);
+
+    expect(inbox.dismissInventory("/a/one.md")).toBe(true);
+    expect(inbox.get("/a/one.md")?.inventoryHidden).toBe(true);
+    expect(inbox.get("/a/two.md")?.inventoryHidden).toBe(false);
+    expect(inbox.dismissInventory("/a/one.md")).toBe(false);
+
+    expect(inbox.upsert(seed("/a/one.md", 2_000))).toBe(true);
+    expect(inbox.get("/a/one.md")?.inventoryHidden).toBe(false);
+  });
+
+  it("keeps an inventory row hidden across a reload with no change", () => {
+    const inbox = new InboxModel();
+    inbox.replace([seed("/a/one.md", 1_000)]);
+    inbox.dismissInventory("/a/one.md");
+
+    inbox.reconcile([seed("/a/one.md", 1_000)]);
+
+    expect(inbox.get("/a/one.md")?.inventoryHidden).toBe(true);
+  });
+});

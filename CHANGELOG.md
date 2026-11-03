@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Dismiss browse rows with the middle mouse button**: middle-clicking a row
+  removes it from the list on screen. A Recently changed row is acknowledged and
+  returns only if the document changes again; an All documents row is hidden for
+  the session until its next change.
 - **Upgrade restart**: after a successful build and install, `scripts/install.sh`
   detects a running installed instance through a per-user runtime record,
   asks for consent (default yes), stops it with `--quit` followed by one

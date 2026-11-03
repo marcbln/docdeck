@@ -291,6 +291,7 @@ class AppState {
         else void this.openDocument(path);
       },
       onClose: (path) => void this.closeTabPath(path),
+      onDismiss: (path, mode) => this.dismissBrowseRow(path, mode),
       onCloseAll: () => void this.closeAllTabs(),
       onClear: () => this.clearRecent(),
       onUndo: () => this.undoClear(),
@@ -1175,6 +1176,7 @@ class AppState {
 
   private renderSidebar(): void {
     const entries = this.inbox.entriesSorted();
+    const inventory = entries.filter((entry) => !entry.inventoryHidden);
     this.sidebarPanel.render({
       openRows: buildOpenRows(
         this.tabs.values(),
@@ -1182,7 +1184,7 @@ class AppState {
         this.autoSort,
       ),
       browseMode: this.preferences.browseMode,
-      inventory: filterEntries(entries, this.filterTerm),
+      inventory: filterEntries(inventory, this.filterTerm),
       recent: filterEntries(selectRecent(entries, this.clearedAt), this.filterTerm),
       openPaths: new Set(this.tabs.keys()),
       activePath: this.activePath,
@@ -1202,6 +1204,26 @@ class AppState {
     if (this.preferences.browseMode === mode) return;
     this.preferences.browseMode = mode;
     this.persist();
+    this.renderSidebar();
+  }
+
+  /**
+   * Middle-click dismissal: removes one row from the list on screen. A dismissed
+   * recent change is acknowledged and stays gone until the document changes
+   * again; a dismissed inventory row is hidden for the session until then.
+   */
+  private dismissBrowseRow(path: string, mode: BrowseMode): void {
+    if (mode === "recent") {
+      const entry = this.inbox.get(path);
+      if (!entry || !this.inbox.dismissRecent(path)) return;
+      const tab = this.tabs.get(path);
+      if (tab) tab.hasUnreadUpdate = false;
+      if (this.acknowledgementsReady) {
+        this.acks.acknowledge(path, entry.modifiedTime);
+      }
+    } else if (!this.inbox.dismissInventory(path)) {
+      return;
+    }
     this.renderSidebar();
   }
 

@@ -27,6 +27,8 @@ export interface InboxEntry {
   unread: boolean;
   /** Deleted on disk; kept visible until it reappears or the session ends. */
   deleted: boolean;
+  /** Hidden from All Documents for the session; a later change reveals it. */
+  inventoryHidden: boolean;
   /** Provenance for reload reconciliation. */
   origin: InboxOrigin;
 }
@@ -110,6 +112,7 @@ export class InboxModel {
           changedAt: 0,
           unread: false,
           deleted: false,
+          inventoryHidden: false,
           origin: seed.origin ?? "manual",
         });
         changed = true;
@@ -121,9 +124,14 @@ export class InboxModel {
         existing.deleted ||
         (seed.origin !== undefined && seed.origin !== existing.origin)
       ) {
+        const contentChanged =
+          existing.filename !== seed.filename ||
+          existing.modifiedTime !== seed.modifiedTime ||
+          existing.deleted;
         existing.filename = seed.filename;
         existing.modifiedTime = seed.modifiedTime;
         existing.deleted = false;
+        if (contentChanged) existing.inventoryHidden = false;
         if (seed.origin !== undefined) existing.origin = seed.origin;
         changed = true;
       }
@@ -168,6 +176,7 @@ export class InboxModel {
         changedAt: observedAt,
         unread: markUnread,
         deleted: false,
+        inventoryHidden: false,
         origin: seed.origin ?? "manual",
       });
       return true;
@@ -183,6 +192,7 @@ export class InboxModel {
     existing.filename = seed.filename;
     existing.modifiedTime = seed.modifiedTime;
     existing.deleted = false;
+    existing.inventoryHidden = false;
     if (seed.origin !== undefined) existing.origin = seed.origin;
     if (recordChange) existing.changedAt = this.now();
     if (markUnread) existing.unread = true;
@@ -200,7 +210,25 @@ export class InboxModel {
     const entry = this.entries.get(path);
     if (!entry || entry.deleted) return false;
     entry.deleted = true;
+    entry.inventoryHidden = false;
     entry.changedAt = this.now();
+    return true;
+  }
+
+  /** Removes one document from Recently Changed, acknowledging its change. */
+  dismissRecent(path: string): boolean {
+    const entry = this.entries.get(path);
+    if (!entry || entry.changedAt === 0) return false;
+    entry.changedAt = 0;
+    entry.unread = false;
+    return true;
+  }
+
+  /** Hides one document from All Documents until it changes again. */
+  dismissInventory(path: string): boolean {
+    const entry = this.entries.get(path);
+    if (!entry || entry.inventoryHidden) return false;
+    entry.inventoryHidden = true;
     return true;
   }
 
@@ -258,6 +286,7 @@ export class InboxModel {
           changedAt: 0,
           unread: true,
           deleted: false,
+          inventoryHidden: false,
           origin: seed.origin ?? "config",
         });
         changed = true;
@@ -266,15 +295,15 @@ export class InboxModel {
 
       const origin =
         existing.origin === "manual" ? "manual" : seed.origin ?? existing.origin;
-      if (
+      const contentChanged =
         existing.filename !== seed.filename ||
         existing.modifiedTime !== seed.modifiedTime ||
-        existing.deleted ||
-        existing.origin !== origin
-      ) {
+        existing.deleted;
+      if (contentChanged || existing.origin !== origin) {
         existing.filename = seed.filename;
         existing.modifiedTime = seed.modifiedTime;
         existing.deleted = false;
+        if (contentChanged) existing.inventoryHidden = false;
         existing.origin = origin;
         changed = true;
       }
@@ -316,6 +345,7 @@ export class InboxModel {
     entry.path = newPath;
     entry.filename = fileName(newPath);
     entry.deleted = false;
+    entry.inventoryHidden = false;
     this.entries.set(newPath, entry);
     return true;
   }
@@ -338,6 +368,7 @@ export class InboxModel {
       changedAt: this.now(),
       unread: true,
       deleted: false,
+      inventoryHidden: false,
       origin: seed.origin ?? "manual",
     });
     return true;

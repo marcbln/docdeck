@@ -33,6 +33,8 @@ export interface SidebarViewState {
 export interface SidebarPanelOptions {
   onOpen(path: string): void;
   onClose(path: string): void;
+  /** Dismisses one row from the currently visible browse list. */
+  onDismiss(path: string, mode: BrowseMode): void;
   /** Closes every document in the Open Documents pane. */
   onCloseAll(): void;
   onClear(): void;
@@ -405,6 +407,20 @@ export class SidebarPanel {
         row,
       );
     };
+    this.browseList.addEventListener("auxclick", (event) => {
+      if (event.button !== 1) return;
+      const row = (event.target as Element | null)?.closest<HTMLElement>(
+        ".inbox-row",
+      );
+      const index = row ? Number(row.dataset.index) : NaN;
+      const item = Number.isInteger(index)
+        ? this.browseItems()[index]
+        : undefined;
+      if (!row || item === undefined) return;
+      event.preventDefault();
+      this.options.onDismiss(item.path, this.state.browseMode);
+    });
+
     this.browseList.addEventListener("contextmenu", browseContextMenu);
     this.browseList.addEventListener("keydown", (event) => {
       if (
