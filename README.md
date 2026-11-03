@@ -146,6 +146,37 @@ npm run install:bin            # build and install to ~/.local/bin
 ./scripts/install.sh --default # additionally set it as the default .md handler
 ```
 
+### Upgrading a running instance
+
+`scripts/install.sh` detects a running installed instance only after the build
+and install both succeed. On a terminal it asks
+`Restart the running docdeck instance (pid N) now? [Y/n]`; accepting stops the
+old process cleanly and starts the new build from the installed entry point with
+the original arguments and working directory.
+
+```bash
+./scripts/install.sh --restart     # restart without prompting
+./scripts/install.sh --no-restart  # never signal the running instance
+./scripts/install.sh -n            # never prompt; print manual-restart guidance
+```
+
+`docdeck --quit` asks the running instance to exit without opening a window. It
+is a lifecycle control flag, never a document or folder; with nothing running it
+prints `docdeck is not running` and exits 0.
+
+The installer relies on a per-user runtime record at
+`$XDG_RUNTIME_DIR/docdeck/instance.json` (falling back to
+`$HOME/.local/state/docdeck/instance.json`). It holds only the pid, executable,
+launch arguments, working directory, and start time, with directory mode `0700`
+and file mode `0600`; it is removed on a clean exit. It never contains document
+content, preferences, or watch configuration. A stale record is validated and
+cleared before anything is signalled.
+
+If the detected process is a development build, the installer names both
+executables and asks before replacing it. Declining leaves the old instance
+untouched: open tabs are session-scoped, so quit and relaunch to use the new
+build.
+
 ### Install as a system package
 
 ```bash
@@ -463,6 +494,10 @@ reload result is ordered by a monotonic generation; older results are ignored.
   filter (name, folder or project) instead.
 - **CLI folders are session-only.** They survive live reloads, but put them in
   the config to restore them on the next launch.
+- **Upgrade restart is shell-installer only.** Packaged bundles and in-app
+  updates are out of scope. A restart reopens the original launch targets, but
+  tabs opened from inside the app are session-scoped and close with the old
+  instance.
 - **Rename pairing depends on file identity.** Where the platform cannot report
   a stable file identity, a rename falls back to a delete plus a create.
 - **Very new directories can need one more write.** A file written into a

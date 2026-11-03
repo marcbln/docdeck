@@ -287,4 +287,25 @@ mod tests {
         assert!(resolve_link(&base, "missing.md").is_err());
         assert!(resolve_link(&base, "").is_err());
     }
+
+    #[test]
+    fn control_flags_are_never_classified_as_paths() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        fs::write(&file, "# plan").unwrap();
+
+        let argv = vec![
+            "docdeck".to_string(),
+            "--quit".to_string(),
+            "plan.md".to_string(),
+        ];
+
+        let entries = classify_args(&argv, dir.path());
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].path,
+            file.canonicalize().unwrap().to_string_lossy().into_owned()
+        );
+    }
 }

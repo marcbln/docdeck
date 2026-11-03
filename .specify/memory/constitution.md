@@ -1,6 +1,18 @@
 # docdeck Constitution
 
 <!--
+Sync Impact Report (2026-11-03, feature 003-installer-upgrade-restart)
+- Version: 1.1.0 -> 1.2.0 (MINOR: materially expanded persistence guidance;
+  no principle removed or redefined)
+- Modified sections: Technical Constraints -> Persistence (permits the
+  ephemeral per-user runtime instance record used by the installer upgrade
+  restart flow, and states its path, permissions, content limit, and cleanup)
+- Added/removed principles: none
+- Templates: no `.specify/templates` change required
+- Follow-up TODOs: none
+-->
+
+<!--
 Sync Impact Report (2026-11-01, feature 002-watch-inbox-followups)
 - Version: 1.0.0 -> 1.1.0 (MINOR: materially expanded platform and persistence
   guidance; no principle removed or redefined)
@@ -122,8 +134,14 @@ to maintain.
   restarts. Document content, open documents, `Recently Changed` activity and
   the browse filter are never persisted. The watch configuration is a TOML file
   read at startup and live-reloaded after valid edits; the in-app surface may
-  write that file atomically, and it is the only file docdeck writes. Watched
-  documents remain read-only.
+  write that file atomically. The app also writes one ephemeral per-user runtime
+  instance record, `$XDG_RUNTIME_DIR/docdeck/instance.json` (falling back to
+  `$HOME/.local/state/docdeck/instance.json`, or
+  `%LOCALAPPDATA%\docdeck\instance.json` on Windows), with a `0700` directory,
+  a `0600` file, atomic replace, a 64 KiB bound, and metadata only (pid,
+  executable, launch arguments, working directory, and start time); it is
+  removed on clean exit and exists solely for upgrade restart and shutdown
+  control. Watched documents remain read-only.
 - **Rendering**: GitHub-flavoured Markdown, syntax highlighting, Mermaid, and
   frontmatter tables are core behavior and MUST NOT regress.
 - **Themes**: Dark and light palettes use the Catppuccin token set; components
@@ -166,4 +184,4 @@ states the non-negotiable principles those conventions implement.
   coding guidance; they MUST remain consistent with this document. If they
   disagree, this document wins and the guidance is corrected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-11-01
+**Version**: 1.2.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-11-03

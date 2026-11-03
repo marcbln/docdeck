@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Upgrade restart**: after a successful build and install, `scripts/install.sh`
+  detects a running installed instance through a per-user runtime record,
+  asks for consent (default yes), stops it with `--quit` followed by one
+  `SIGTERM` at most, confirms it exited, and starts the installed entry point
+  from the original working directory with the original arguments. New
+  `--restart`, `--no-restart` and `-n`/`--no-interaction` flags control the
+  prompt; non-interactive runs never block; stale, foreign, development, and
+  unresponsive instances are validated and refused safely.
+- **`docdeck --quit`**: a lifecycle control flag that asks the running instance
+  to exit without opening a window. It is never treated as a document or folder
+  and exits 0 with `docdeck is not running` when no instance is live.
 - **Summarize recent changes**: a ✨ button in the Recently changed toolbar
   asks a Rig agent (`[summary]` in `config.toml`, API key from the provider's
   standard environment variable) for a batch overview plus optional
@@ -124,6 +135,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preferences persisted under `docdeck.preferences.v1`.
 
 ### Fixed
+- A successful install no longer leaves the user talking to the previous build.
+  `scripts/install.sh` stops the old instance and relaunches the installed entry
+  point, so `docdeck file.md` after an upgrade cannot be forwarded into stale
+  code; a failed or aborted stop leaves the original instance running and starts
+  nothing.
 - Clicking a link in a rendered document no longer navigates docdeck's webview
   away from the app and forces a restart. Web links open in the system browser,
   local Markdown links open as tabs, other local files open in their default

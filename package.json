@@ -17,7 +17,8 @@
     "check": "npm run typecheck && npm run test && npm run tauri build -- --no-bundle",
     "simulate": "./scripts/simulate_agent_writes.sh",
     "simulate:folder": "./scripts/simulate_folder_watch.sh",
-    "install:bin": "./scripts/install.sh"
+    "install:bin": "./scripts/install.sh",
+    "test:install": "./scripts/install_test.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

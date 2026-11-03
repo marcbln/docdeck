@@ -6,6 +6,7 @@ mod config_edit;
 mod config_watch;
 mod detach;
 mod folder;
+mod instance;
 mod navigation;
 mod paths;
 mod rename;
@@ -25,6 +26,8 @@ mod config_watch_test;
 #[cfg(test)]
 mod folder_test;
 #[cfg(test)]
+mod instance_test;
+#[cfg(test)]
 mod navigation_test;
 #[cfg(test)]
 mod paths_test;
@@ -39,7 +42,7 @@ mod watcher_test;
 
 use std::env;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
 use config_watch::ConfigWatchState;
@@ -65,29 +68,65 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
+/// Returns the live instance record, clearing a stale one. A malformed record
+/// is treated as stale rather than trusted.
+fn live_instance_record() -> Option<(PathBuf, instance::InstanceRecord)> {
+    let path = instance::record_path()?;
+    match instance::read_record(&path) {
+        Ok(record) if instance::is_process_alive(record.pid) => Some((path, record)),
+        _ => {
+            let _ = instance::remove_record_file(&path);
+            None
+        }
+    }
+}
+
 pub fn run() {
     let argv: Vec<String> = env::args().collect();
+    let quit = instance::wants_quit(&argv);
 
-    // Report bad path arguments while stderr still points at the caller's
-    // terminal. `detach_from_terminal` redirects stdio to /dev/null, so doing
-    // this afterwards would swallow the message along with the typo.
-    let cwd = env::current_dir().unwrap_or_default();
-    for warning in paths::classify_args_with_warnings(&argv, &cwd).1 {
-        eprintln!("[docdeck] {warning}");
+    if quit {
+        match live_instance_record() {
+            Some((_, record)) => eprintln!("[docdeck] asking pid {} to quit", record.pid),
+            None => {
+                eprintln!("docdeck is not running");
+                return;
+            }
+        }
     }
 
-    detach::detach_from_terminal();
+    if !quit {
+        // Report bad path arguments while stderr still points at the caller's
+        // terminal. `detach_from_terminal` redirects stdio to /dev/null, so doing
+        // this afterwards would swallow the message along with the typo.
+        let cwd = env::current_dir().unwrap_or_default();
+        for warning in paths::classify_args_with_warnings(&argv, &cwd).1 {
+            eprintln!("[docdeck] {warning}");
+        }
 
-    // Must happen before any window exists: WebKitGTK reads these once, while
-    // it initialises, so setting them later has no effect.
-    render::configure(&argv);
+        detach::detach_from_terminal();
+
+        // Must happen before any window exists: WebKitGTK reads these once, while
+        // it initialises, so setting them later has no effect.
+        render::configure(&argv);
+    }
 
     let watcher_state = WatcherState::new();
+    let instance_path = instance::record_path();
+    let setup_instance_path = instance_path.clone();
+    let instance_pid = std::process::id();
 
     let mut builder = tauri::Builder::default();
 
     // Must be registered first so the IPC socket exists before anything else.
     builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        // Lifecycle control takes precedence over every path argument. Asking
+        // the primary to exit must never open a document named `--quit`.
+        if instance::wants_quit(&argv) {
+            app.exit(0);
+            return;
+        }
+
         // Forward `docdeck path/to/doc.md` or `docdeck ./_ai` from a second
         // shell into the running window. Relative arguments belong to *that*
         // shell's working directory, which is `cwd` here — not ours.
@@ -118,7 +157,27 @@ pub fn run() {
                 }
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
+            // A `--quit` that became the primary because the IPC socket had
+            // already vanished still must not leave a window behind.
+            if quit {
+                app.handle().exit(0);
+                return Ok(());
+            }
+
+            if let Some(path) = setup_instance_path.as_deref() {
+                match instance::capture() {
+                    Some(record) => {
+                        if let Err(error) = instance::write_record(&record, path) {
+                            eprintln!("[docdeck] could not write instance record: {error}");
+                        }
+                    }
+                    None => eprintln!(
+                        "[docdeck] could not determine process metadata for the instance record"
+                    ),
+                }
+            }
+
             app.state::<WatcherState>()
                 .init(app.handle().clone())
                 .map_err(io::Error::other)?;
@@ -159,6 +218,15 @@ pub fn run() {
             commands::summarize_changes,
             startup_paths
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running docdeck application");
+        .build(tauri::generate_context!())
+        .expect("error while building docdeck application")
+        .run(move |_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(path) = instance_path.as_deref() {
+                    if let Err(error) = instance::remove_record_if_owned(path, instance_pid) {
+                        eprintln!("[docdeck] could not remove instance record: {error}");
+                    }
+                }
+            }
+        });
 }

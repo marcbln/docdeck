@@ -14,16 +14,35 @@
 #   ./scripts/install.sh --no-build   # reinstall a binary from `npm run tauri build`
 #   ./scripts/install.sh --no-desktop # skip the Markdown desktop association (Linux)
 #   ./scripts/install.sh --default    # also make docdeck the default Markdown handler
+#   ./scripts/install.sh --restart    # restart a running installed instance without prompting
+#   ./scripts/install.sh --no-restart # never signal a running instance
+#   ./scripts/install.sh -n           # never prompt; print manual-restart guidance
+#
+# After a successful build and install, a running docdeck instance is detected
+# through its runtime record. On a terminal the installer asks before stopping
+# it; without a terminal it never blocks and prints how to restart manually.
 #
 # Environment:
 #   PREFIX   install prefix (default: ~/.local/bin)
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# shellcheck source=lib/restart.sh
+source "$SCRIPT_DIR/lib/restart.sh"
+
+usage() {
+  sed -n '/^# Build docdeck/,/^#   PREFIX/p' "$0" | sed 's/^# \{0,1\}//'
+}
+
 MODE="copy"
 BUILD=1
 DESKTOP=1
 MAKE_DEFAULT=0
+RESTART_FORCE=0
+RESTART_FORBID=0
+NO_INTERACTION=0
 PREFIX="${PREFIX:-$HOME/.local/bin}"
 
 while [[ $# -gt 0 ]]; do
@@ -33,15 +52,32 @@ while [[ $# -gt 0 ]]; do
     --no-build) BUILD=0 ;;
     --no-desktop) DESKTOP=0 ;;
     --default)  MAKE_DEFAULT=1 ;;
+    --restart)  RESTART_FORCE=1 ;;
+    --no-restart) RESTART_FORBID=1 ;;
+    -n|--no-interaction) NO_INTERACTION=1 ;;
     --prefix)   shift; PREFIX="$1" ;;
     --prefix=*) PREFIX="${1#*=}" ;;
-    -h|--help)  sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  usage; exit 0 ;;
     *)          printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
 done
 
-cd "$(dirname "$0")/.."
+if [[ $RESTART_FORCE -eq 1 && $RESTART_FORBID -eq 1 ]]; then
+  printf 'error: --restart and --no-restart are mutually exclusive\n' >&2
+  exit 2
+fi
+
+if [[ $RESTART_FORCE -eq 1 ]]; then
+  RESTART_CHOICE="restart"
+elif [[ $RESTART_FORBID -eq 1 ]]; then
+  RESTART_CHOICE="decline"
+else
+  RESTART_CHOICE="auto"
+fi
+RESTART_NO_INTERACTION="$NO_INTERACTION"
+
+cd "$SCRIPT_DIR/.."
 
 APP_NAME="docdeck"
 BIN_SRC="src-tauri/target/release/$APP_NAME"
@@ -82,6 +118,8 @@ else
   mv -f "$BIN_DST.tmp" "$BIN_DST"
   printf '==> Installed %s\n' "$BIN_DST"
 fi
+
+BIN_DST_ABS="$(cd "$(dirname "$BIN_DST")" && pwd)/$(basename "$BIN_DST")"
 
 case ":$PATH:" in
   *":$PREFIX:"*) ;;
@@ -150,6 +188,11 @@ EOF
       printf 'warning: xdg-mime not found; pick the default in your file manager\n' >&2
     fi
   fi
+fi
+
+# Only touch a running process after both the build and the install succeeded.
+if ! restart_after_install "$BIN_DST_ABS" "$MODE"; then
+  exit 1
 fi
 
 # Read the version from the manifest — the binary has no --version flag and
