@@ -1,6 +1,7 @@
 import { InboxBrowser } from "./browse-modal";
 import type { InboxEntry, InboxStatus, ScanProgress } from "./inbox-model";
 import { compactPath } from "./project";
+import type { SummaryStatus } from "./summary-model";
 import { formatRelativeTime } from "./relative-time";
 import { bindInboxRow, createInboxRow } from "./sidebar-rows";
 import type { BrowseMode, OpenRow } from "./sidebar-model";
@@ -22,6 +23,10 @@ export interface SidebarViewState {
   canUndo: boolean;
   /** Session-only filter term; empty means the full list. */
   filterTerm: string;
+  /** Whether the summary agent is configured and usable. */
+  summary: SummaryStatus;
+  /** True while a summary request is in flight. */
+  summaryBusy: boolean;
   now: number;
 }
 
@@ -32,6 +37,7 @@ export interface SidebarPanelOptions {
   onCloseAll(): void;
   onClear(): void;
   onUndo(): void;
+  onSummarize(): void;
   onModeChange(mode: BrowseMode): void;
   /** Called whenever the browse filter changes (including clear/Escape). */
   onFilterChange(term: string): void;
@@ -69,6 +75,7 @@ export class SidebarPanel {
   private readonly modeRecent: HTMLButtonElement;
   private readonly clearBtn: HTMLButtonElement;
   private readonly undoBtn: HTMLButtonElement;
+  private readonly summaryBtn: HTMLButtonElement;
   private readonly popoutBtn: HTMLButtonElement;
   private readonly filterInput: HTMLInputElement;
   private readonly filterClear: HTMLButtonElement;
@@ -106,6 +113,14 @@ export class SidebarPanel {
       browseCollapsed: false,
       canUndo: false,
       filterTerm: "",
+      summary: {
+        ready: false,
+        provider: null,
+        model: null,
+        problem: "Checking summary configuration…",
+        configPath: "",
+      },
+      summaryBusy: false,
       now: Date.now(),
     };
 
@@ -173,13 +188,22 @@ export class SidebarPanel {
     actions.className = "sidebar-browse-actions";
     this.clearBtn = this.actionButton("Clear", "Clear recently changed", "clear");
     this.undoBtn = this.actionButton("Undo", "Undo the last clear", "undo");
+    this.summaryBtn = this.actionButton(
+      "✨",
+      "Summarize recent changes",
+      "summary",
+    );
+    this.summaryBtn.setAttribute(
+      "aria-label",
+      "Summarize recently changed documents",
+    );
     this.popoutBtn = this.actionButton(
       "⤢",
       "Open the full-height inventory",
       "popout",
     );
     this.popoutBtn.setAttribute("aria-label", "Open the full-height inventory");
-    actions.append(this.clearBtn, this.undoBtn, this.popoutBtn);
+    actions.append(this.clearBtn, this.undoBtn, this.summaryBtn, this.popoutBtn);
     toolbar.append(modes, actions);
 
     const filterRow = document.createElement("div");
@@ -425,6 +449,7 @@ export class SidebarPanel {
     this.clearBtn.addEventListener("click", () => this.options.onClear());
     this.clearAllBtn.addEventListener("click", () => this.options.onCloseAll());
     this.undoBtn.addEventListener("click", () => this.options.onUndo());
+    this.summaryBtn.addEventListener("click", () => this.options.onSummarize());
     this.popoutBtn.addEventListener("click", () => this.openPopout());
   }
 
@@ -538,6 +563,12 @@ export class SidebarPanel {
 
     this.clearBtn.disabled = !isRecent || this.state.recent.length === 0;
     this.undoBtn.disabled = !this.state.canUndo;
+    this.summaryBtn.disabled =
+      !isRecent ||
+      this.state.recent.length === 0 ||
+      this.state.summaryBusy ||
+      !this.state.summary.ready;
+    this.summaryBtn.title = this.summaryTitle();
     this.popoutBtn.disabled = this.state.inventory.length === 0;
 
     this.renderStatus();
@@ -583,6 +614,20 @@ export class SidebarPanel {
     } else {
       this.browseEmpty.textContent = "No documents match the configured watches.";
     }
+  }
+
+  private summaryTitle(): string {
+    if (this.state.summaryBusy) return "Summarizing recent changes…";
+    if (!this.state.summary.ready) {
+      return this.state.summary.problem ?? "Configure [summary] to summarize changes";
+    }
+    if (this.state.browseMode !== "recent") {
+      return "Switch to Recently changed to summarize";
+    }
+    if (this.state.recent.length === 0) return "No recent changes to summarize";
+    return `Summarize ${this.state.recent.length} recent change${
+      this.state.recent.length === 1 ? "" : "s"
+    }`;
   }
 
   private renderStatus(): void {

@@ -22,6 +22,8 @@ import {
   type ScanProgress,
 } from "./inbox-model";
 import { SidebarPanel } from "./sidebar-panel";
+import { SummaryPanel } from "./summary-panel";
+import type { SummaryResult, SummaryStatus } from "./summary-model";
 import {
   buildOpenRows,
   selectRecent,
@@ -192,6 +194,17 @@ class AppState {
   /** Whether a baseline exists, so acknowledging is meaningful. */
   private acknowledgementsReady = false;
   private readonly configPanel: ConfigPanel;
+  private readonly summaryPanel: SummaryPanel;
+  private summaryStatus: SummaryStatus = {
+    ready: false,
+    provider: null,
+    model: null,
+    problem: "Checking summary configuration…",
+    configPath: "",
+  };
+  private summaryBusy = false;
+  /** Discards results whose modal was closed or superseded by a newer run. */
+  private summaryRequest = 0;
   /** Observation floor for Recently Changed; 0 shows the whole session. */
   private clearedAt = 0;
   /** Snapshot for undoing the last clear. */
@@ -218,6 +231,23 @@ class AppState {
       },
       onApplied: (reload) => this.applyReloadResult(reload),
       onClosed: () => undefined,
+    });
+
+    this.summaryPanel = new SummaryPanel({
+      onOpen: (path) => {
+        if (this.tabs.has(path)) void this.setActiveTab(path);
+        else void this.openDocument(path);
+      },
+      onRetry: () => void this.summarizeRecent(),
+      onConfigure: () => {
+        this.summaryPanel.close();
+        void this.openConfigPanel();
+      },
+      onClose: () => {
+        this.summaryRequest += 1;
+        this.summaryBusy = false;
+        this.renderSidebar();
+      },
     });
 
     this.metadata = new MetadataView(
@@ -264,6 +294,7 @@ class AppState {
       onCloseAll: () => void this.closeAllTabs(),
       onClear: () => this.clearRecent(),
       onUndo: () => this.undoClear(),
+      onSummarize: () => void this.summarizeRecent(),
       onModeChange: (mode) => this.setBrowseMode(mode),
       onFilterChange: (term) => {
         this.filterTerm = term;
@@ -432,6 +463,22 @@ class AppState {
     }
   }
 
+  /** Re-reads whether the summary agent is configured and usable. */
+  private async refreshSummaryStatus(): Promise<void> {
+    try {
+      this.summaryStatus = await invoke<SummaryStatus>("summary_status");
+    } catch (error) {
+      this.summaryStatus = {
+        ready: false,
+        provider: null,
+        model: null,
+        problem: describeError(error),
+        configPath: "",
+      };
+    }
+    this.renderSidebar();
+  }
+
   private static reloadSummary(result: ReloadResult): ReloadSummary {
     return {
       at: result.at,
@@ -471,6 +518,7 @@ class AppState {
     }
 
     this.renderSidebar();
+    void this.refreshSummaryStatus();
   }
 
   /**
@@ -1099,6 +1147,7 @@ class AppState {
       this.scansInFlight -= 1;
     }
     this.renderSidebar();
+    void this.refreshSummaryStatus();
   }
 
   /** Registers session watches for CLI folder arguments. */
@@ -1143,6 +1192,8 @@ class AppState {
       browseCollapsed: this.preferences.browseSectionCollapsed,
       canUndo: this.clearSnapshot !== null,
       filterTerm: this.filterTerm,
+      summary: this.summaryStatus,
+      summaryBusy: this.summaryBusy,
       now: Date.now(),
     });
   }
@@ -1187,6 +1238,51 @@ class AppState {
 
   private stateRecentCount(): number {
     return selectRecent(this.inbox.entriesSorted(), this.clearedAt).length;
+  }
+
+  /**
+   * Asks the configured Rig agent for an overview of the rows currently shown
+   * in Recently changed. Closing the modal abandons the result.
+   */
+  private async summarizeRecent(): Promise<void> {
+    if (this.summaryBusy) return;
+
+    const entries = filterEntries(
+      selectRecent(this.inbox.entriesSorted(), this.clearedAt),
+      this.filterTerm,
+    );
+    if (entries.length === 0) {
+      this.toast.show("No recent changes to summarize.", "info");
+      return;
+    }
+    if (!this.summaryStatus.ready) {
+      this.toast.show(
+        this.summaryStatus.problem ?? "The summary agent is not configured.",
+        "error",
+      );
+      return;
+    }
+
+    const request = ++this.summaryRequest;
+    this.summaryBusy = true;
+    this.renderSidebar();
+    this.summaryPanel.setLoading(entries.length);
+
+    try {
+      const result = await invoke<SummaryResult>("summarize_changes", {
+        paths: entries.map((entry) => entry.path),
+      });
+      if (request !== this.summaryRequest) return;
+      this.summaryPanel.setResult(result);
+    } catch (error) {
+      if (request !== this.summaryRequest) return;
+      this.summaryPanel.setError(describeError(error));
+    } finally {
+      if (request === this.summaryRequest) {
+        this.summaryBusy = false;
+        this.renderSidebar();
+      }
+    }
   }
 
   /**

@@ -10,6 +10,7 @@ mod navigation;
 mod paths;
 mod rename;
 mod render;
+mod summary;
 mod tray;
 mod watcher;
 
@@ -107,6 +108,7 @@ pub fn run() {
     builder
         .manage(watcher_state)
         .manage(ConfigWatchState::new())
+        .manage(std::sync::Arc::new(summary::SummaryStore::new()))
         .on_window_event(|window, event| {
             // Regaining focus means the user has seen the changes: retire the
             // unread dot. The tray may be disabled, so this is best-effort.
@@ -153,6 +155,8 @@ pub fn run() {
             commands::open_external_url,
             commands::open_local_path,
             commands::resolve_document_link,
+            commands::summary_status,
+            commands::summarize_changes,
             startup_paths
         ])
         .run(tauri::generate_context!())

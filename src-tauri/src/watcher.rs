@@ -18,10 +18,11 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::paths::{file_identity, is_relevant, modified_millis, ExcludeSet, FileIdentity};
 use crate::rename::{RenameOutcome, RenamePairer};
+use crate::summary::SummaryStore;
 
 /// Debounce window for filesystem events.
 ///
@@ -136,6 +137,11 @@ impl WatcherState {
                         events, &files, &roots, &excludes, &identities, &pairer,
                     );
                     if !changes.is_empty() {
+                        // Snapshot before the webview can act on the event, so a
+                        // summary started from the refreshed list has a baseline.
+                        if let Some(store) = app.try_state::<Arc<SummaryStore>>() {
+                            store.observe_changes(&changes);
+                        }
                         let _ = app.emit("paths-changed", changes);
                     }
                 }

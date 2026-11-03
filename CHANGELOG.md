@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Summarize recent changes**: a ✨ button in the Recently changed toolbar
+  asks a Rig agent (`[summary]` in `config.toml`, API key from the provider's
+  standard environment variable) for a batch overview plus optional
+  per-document details. The agent receives TOC, frontmatter and short diff
+  excerpts, and can call `get_toc`, `get_sections`, `search_sections` and
+  `get_change` under a bounded tool-call budget. docdeck keeps the last two
+  in-session versions of each changed document, so later writes produce real
+  unified diffs; a never-opened document falls back to current content. The
+  result is session-only and is discarded when the modal closes.
 - Linux desktop integration in `scripts/install.sh`: installs a
   `docdeck.desktop` entry and icons and registers `text/markdown` /
   `text/x-markdown`, so docdeck appears under "Open With" in file managers.

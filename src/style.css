@@ -1394,6 +1394,196 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Changes summary modal
+   -------------------------------------------------------------------------- */
+
+.summary-modal {
+  width: min(760px, 100%);
+  height: min(82vh, 760px);
+}
+
+.summary-body {
+  padding: 18px 20px 20px;
+}
+
+.summary-overview {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.summary-details-toggle {
+  margin-bottom: 12px;
+}
+
+.summary-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.summary-details[hidden] {
+  display: none;
+}
+
+.summary-group-label {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.summary-doc {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+}
+
+.summary-doc > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary-doc > summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary-doc > summary::before {
+  content: "▸";
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.summary-doc[open] > summary::before {
+  content: "▾";
+}
+
+.summary-doc > summary:hover {
+  color: var(--accent-color);
+}
+
+.summary-doc-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summary-doc-state {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.summary-doc-state[data-state="updated"] {
+  color: var(--dot-color);
+}
+
+.summary-doc-state[data-state="deleted"] {
+  color: var(--danger-color);
+}
+
+.summary-doc-project {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.summary-doc-summary,
+.summary-bullets {
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.summary-bullets {
+  margin: 6px 0 0;
+  padding-left: 30px;
+}
+
+.summary-bullets li + li {
+  margin-top: 3px;
+}
+
+.summary-open {
+  margin: 10px 12px 12px;
+}
+
+.summary-note {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.summary-footer {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.summary-loading p {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.summary-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.summary-skeleton-line {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated),
+    var(--border-color),
+    var(--bg-elevated)
+  );
+  background-size: 200% 100%;
+  animation: summary-shimmer 1.2s linear infinite;
+}
+
+@keyframes summary-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summary-skeleton-line {
+    animation: none;
+  }
+}
+
+.summary-error p {
+  margin: 0 0 14px;
+  color: var(--danger-color);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.summary-error-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
    Deleted-on-disk documents
    -------------------------------------------------------------------------- */
 

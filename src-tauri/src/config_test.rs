@@ -61,6 +61,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_an_optional_summary_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "[summary]\nprovider = \"openai\"\nmodel = \"gpt-test\"\nmax_tool_calls = 3\n",
+        )
+        .unwrap();
+
+        let loaded = load(&path).unwrap();
+        let summary = loaded.config.summary.expect("summary section");
+        assert_eq!(summary.provider, "openai");
+        assert_eq!(summary.model, "gpt-test");
+        assert_eq!(summary.max_tool_calls, 3);
+        assert_eq!(summary.max_documents, 20);
+        assert_eq!(summary.api_key_env_name(), Some("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn a_config_without_summary_stays_disabled() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "watch = []\n").unwrap();
+        assert!(load(&path).unwrap().config.summary.is_none());
+    }
+
+    #[test]
     fn empty_config_is_valid() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");

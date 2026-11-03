@@ -59,6 +59,14 @@ function state(overrides: Partial<SidebarViewState> = {}): SidebarViewState {
     browseCollapsed: false,
     canUndo: false,
     filterTerm: "",
+    summary: {
+      ready: true,
+      provider: "openai",
+      model: "gpt-test",
+      problem: null,
+      configPath: "/home/u/.config/docdeck/config.toml",
+    },
+    summaryBusy: false,
     now: NOW,
     ...overrides,
   };
@@ -72,6 +80,7 @@ function mount(next: SidebarViewState = state()): {
   onCloseAll: ReturnType<typeof vi.fn>;
   onClear: ReturnType<typeof vi.fn>;
   onUndo: ReturnType<typeof vi.fn>;
+  onSummarize: ReturnType<typeof vi.fn>;
   onModeChange: ReturnType<typeof vi.fn>;
   onFilterChange: ReturnType<typeof vi.fn>;
   onToggleSection: ReturnType<typeof vi.fn>;
@@ -83,6 +92,7 @@ function mount(next: SidebarViewState = state()): {
   const onCloseAll = vi.fn();
   const onClear = vi.fn();
   const onUndo = vi.fn();
+  const onSummarize = vi.fn();
   const onModeChange = vi.fn();
   const onFilterChange = vi.fn();
   const onToggleSection = vi.fn();
@@ -92,6 +102,7 @@ function mount(next: SidebarViewState = state()): {
     onCloseAll,
     onClear,
     onUndo,
+    onSummarize,
     onModeChange,
     onFilterChange,
     onToggleSection,
@@ -109,6 +120,7 @@ function mount(next: SidebarViewState = state()): {
     onCloseAll,
     onClear,
     onUndo,
+    onSummarize,
     onModeChange,
     onFilterChange,
     onToggleSection,
@@ -291,6 +303,54 @@ describe("SidebarPanel", () => {
     expect(undo.disabled).toBe(false);
     undo.click();
     expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables Summarize only when configured and recent changes exist", () => {
+    const { root, onSummarize } = mount(
+      state({
+        browseMode: "recent",
+        recent: [entry("/a/new.md", NOW)],
+      }),
+    );
+    const summarize = root.querySelector<HTMLButtonElement>(
+      ".sidebar-action[data-action='summary']",
+    )!;
+
+    expect(summarize.disabled).toBe(false);
+    summarize.click();
+    expect(onSummarize).toHaveBeenCalledTimes(1);
+
+    const { root: unconfigured } = mount(
+      state({
+        browseMode: "recent",
+        recent: [entry("/a/new.md", NOW)],
+        summary: {
+          ready: false,
+          provider: null,
+          model: null,
+          problem: "Add a [summary] section",
+          configPath: "/c.toml",
+        },
+      }),
+    );
+    const disabled = unconfigured.querySelector<HTMLButtonElement>(
+      ".sidebar-action[data-action='summary']",
+    )!;
+    expect(disabled.disabled).toBe(true);
+    expect(disabled.title).toContain("[summary]");
+
+    const { root: busy } = mount(
+      state({
+        browseMode: "recent",
+        recent: [entry("/a/new.md", NOW)],
+        summaryBusy: true,
+      }),
+    );
+    expect(
+      busy.querySelector<HTMLButtonElement>(
+        ".sidebar-action[data-action='summary']",
+      )!.disabled,
+    ).toBe(true);
   });
 
   it("explains an empty recent list and offers the full inventory", () => {

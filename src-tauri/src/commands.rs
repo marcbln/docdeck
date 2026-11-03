@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::{open_path, open_url};
@@ -10,6 +11,7 @@ use tauri_plugin_opener::{open_path, open_url};
 use crate::config::{self, Limits, MAX_FILES};
 use crate::folder::{self, MAX_SCAN_ENTRIES};
 use crate::paths::modified_millis;
+use crate::summary::{SummaryResult, SummaryStatus, SummaryStore};
 use crate::watcher::WatcherState;
 
 /// Throttle for `scan-progress`: fast enough to feel live, slow enough that a
@@ -236,13 +238,19 @@ pub(crate) fn entry_for(path: &Path, origin: Origin) -> Option<InboxEntry> {
 /// Returns the absolute (canonicalized) path so the frontend can key its tab
 /// state by a stable identifier regardless of how the file was opened.
 #[tauri::command]
-pub fn load_file(path_str: String, watcher: State<WatcherState>) -> Result<FilePayload, String> {
+pub fn load_file(
+    path_str: String,
+    watcher: State<WatcherState>,
+    summary: State<Arc<SummaryStore>>,
+) -> Result<FilePayload, String> {
     let path = PathBuf::from(&path_str);
     let canonical = path
         .canonicalize()
         .map_err(|e| format!("cannot resolve path: {e}"))?;
 
     let content = fs::read_to_string(&canonical).map_err(|e| format!("cannot read file: {e}"))?;
+    // A document the reader just looked at is the baseline for its next write.
+    summary.capture(&canonical, &content);
     let metadata = fs::metadata(&canonical).map_err(|e| format!("cannot stat file: {e}"))?;
     let modified_time = metadata
         .modified()
@@ -312,6 +320,22 @@ pub fn resolve_document_link(base_file: String, href: String) -> Result<Resolved
         is_dir: resolved.is_dir(),
         path: resolved.to_string_lossy().into_owned(),
     })
+}
+
+/// Whether the "Summarize recent changes" button can run.
+#[tauri::command]
+pub fn summary_status() -> SummaryStatus {
+    crate::summary::status()
+}
+
+/// Runs the Rig agent over this session's recently changed documents.
+#[tauri::command]
+pub async fn summarize_changes(
+    summary: State<'_, Arc<SummaryStore>>,
+    paths: Vec<String>,
+) -> Result<SummaryResult, String> {
+    let store = Arc::clone(&summary);
+    crate::summary::summarize(store, paths).await
 }
 
 /// Releases the `inotify` watch for a document once its tab is closed.

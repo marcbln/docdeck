@@ -42,6 +42,15 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   **Clear** empties the activity list and acknowledges its unread markers;
   **Undo** restores both. A document may appear in Open documents and Recently
   changed at the same time, because the lists answer different questions.
+- **Recent-change summaries** — a ✨ button in the **Recently changed** toolbar
+  asks a Rig agent for an overview of the current rows (filter included) plus
+  optional per-document details. The agent reads numbered tables of contents
+  and can call `get_toc`, `get_sections`, `search_sections` and `get_change`
+  under a bounded tool-call budget. docdeck keeps the last two in-session
+  versions of every document the watcher saw, so a later write yields a real
+  unified diff; a document never opened or seen before falls back to current
+  content. Summaries are session-only and closing the modal discards an
+  in-flight result.
 - **Unread indicator** — a document changed since you last reviewed it keeps
   its amber dot until activated, and the marker survives restarts; writing to
   the active document pulses the dot briefly and fades.
@@ -188,7 +197,24 @@ exclude = [
 # enabled = true                # set false to hide the tray entirely
 # notify = "unfocused"          # "off" | "unfocused" | "always"
 # throttle_secs = 10            # minimum gap between notifications
+
+# [summary]                     # optional AI summaries (Recently changed ✨)
+# provider = "openai"           # openai | anthropic | ollama | openrouter |
+#                               # deepseek | groq | mistral | xai | gemini |
+#                               # opencode | zai
+# model = "gpt-4o-mini"
+# # api_key_env = "OPENAI_API_KEY"  # defaults to the provider's standard key
+# # base_url = "https://..."        # openai/anthropic/ollama only
+# max_tool_calls = 8            # per-run retrieval budget
+# max_documents = 20            # per-summary document cap
 ```
+
+`[summary]` is opt-in: without it the ✨ button stays disabled and its tooltip
+explains how to add it. API keys are never stored in the config file; the
+standard environment variables are `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`,
+`XAI_API_KEY`, `GEMINI_API_KEY`, `OPENCODE_API_KEY` and `ZAI_API_KEY`. Ollama
+is keyless by default and reads `OLLAMA_API_BASE_URL`.
 
 - `~` expands to your home directory; `*` matches one path segment; `**`
   matches any depth. Relative paths resolve against your home directory.
@@ -256,6 +282,7 @@ is the triage surface.
 | `All` / `Recently changed` | Switch the browse list's mode |
 | Filter field | Narrow the selected list; `Esc` or `×` clears it |
 | `Clear` / `Undo` | Clear recent activity and acknowledge it / restore it |
+| `✨` | Summarize the current Recently changed rows with the configured agent |
 | `⤢` | Browse the complete matched inventory in a full-height modal |
 | `☰ Outline` | Show or hide the table of contents sidebar |
 | `⚙ Frontmatter` | Show or hide the metadata table above each document |
@@ -380,6 +407,8 @@ src/                  Frontend — document state, sidebar, markdown rendering
   sidebar-rows.ts     Shared two-line row anatomy for browse surfaces
   virtual-list.ts     Windowed list geometry and DOM row recycler
   browse-modal.ts     Full-height windowed inventory pop-out
+  summary-model.ts    Summary result types, grouping and labels
+  summary-panel.ts    Change-summary modal: loading, overview, details, errors
   style.css           Catppuccin Mocha + Latte, sidebar, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
@@ -393,11 +422,16 @@ src-tauri/src/
   watcher.rs          Debounced watcher, ownership sets, event kinds, identities
   tray.rs             Panel tray icon, presence dot compositing, notifications
   render.rs           WebKit renderer configuration
+  summary/mod.rs      Summary status and command entry points
+  summary/agent.rs    Rig agent, prompt, model providers and retrieval tools
+  summary/store.rs    Bounded last-two-versions snapshots and unified diffs
+  summary/toc.rs      Heading extraction and section selection expressions
 ```
 
 The Rust side is deliberately limited to OS concerns (process IPC, filesystem
-watching, disk reads); the webview side owns all view orchestration. They meet
-only at a small set of typed `invoke` commands and events:
+watching, disk reads) plus the optional summary agent; the webview side owns all
+view orchestration. They meet only at a small set of typed `invoke` commands and
+events:
 
 | Direction | Name | Payload |
 | --- | --- | --- |
@@ -405,6 +439,8 @@ only at a small set of typed `invoke` commands and events:
 | → webview | `paths-changed` | `[{ kind, path, fromPath?, exists, modifiedTime? }]` |
 | → webview | `config-reloaded` | A generation-tagged reload result |
 | → webview | `scan-progress` | Live scan path, folder and file counts |
+| → Rust | `summary_status` | Whether `[summary]` is ready, and why not |
+| → Rust | `summarize_changes` | `{ paths }` → overview and per-document details |
 
 `kind` is `created`, `modified`, `deleted`, `renamed` or `movedOut`. `exists`
 and `modifiedTime` are sampled after the debounce window closed, so the UI can
@@ -414,6 +450,13 @@ reload result is ordered by a monotonic generation; older results are ignored.
 ## Known limitations
 
 - **Renders markdown only.** No editing.
+- **Summaries are session-scoped.** Only rows in **Recently changed** can be
+  summarized. A document that changes for the first time after launch has no
+  earlier snapshot, so its first summary describes current content instead of
+  a diff; documents opened or changed again get real diffs.
+- **A summary is not persisted.** Closing the modal abandons an in-flight run
+  (the provider request itself cannot be cancelled) and the next summary starts
+  from scratch. Nothing is written to disk and unread markers are unchanged.
 - **Native find sees only the rendered browse window.** The inline browse list
   and the pop-out inventory keep just the visible rows in the DOM, so the
   browser's find bar cannot match rows scrolled out of view. Use the browse

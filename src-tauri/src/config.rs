@@ -184,7 +184,120 @@ impl Default for TrayConfig {
     }
 }
 
-/// The parsed config file. Both keys are optional so an empty file is valid.
+/// How the optional "Summarize recent changes" agent is configured.
+///
+/// Credentials are never stored here: `api_key_env` names the environment
+/// variable to read, defaulting to the provider's standard variable.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct SummaryConfig {
+    /// Provider key, e.g. `openai`, `anthropic`, `ollama`, `openrouter`.
+    pub provider: String,
+    /// Provider model identifier.
+    pub model: String,
+    /// Override the provider's endpoint (OpenAI- and Anthropic-shaped
+    /// providers only; Ollama reads `OLLAMA_API_BASE_URL`).
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Environment variable holding the API key. Defaults to the provider's
+    /// standard variable; Ollama is keyless unless this is set.
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    /// Per-run tool-call budget.
+    #[serde(default = "default_summary_max_tool_calls")]
+    pub max_tool_calls: usize,
+    /// Maximum documents included in one summary.
+    #[serde(default = "default_summary_max_documents")]
+    pub max_documents: usize,
+}
+
+fn default_summary_max_tool_calls() -> usize {
+    8
+}
+
+fn default_summary_max_documents() -> usize {
+    20
+}
+
+impl SummaryConfig {
+    /// Providers the summary agent can talk to.
+    pub const PROVIDERS: &'static [&'static str] = &[
+        "openai",
+        "anthropic",
+        "ollama",
+        "openrouter",
+        "deepseek",
+        "groq",
+        "mistral",
+        "xai",
+        "gemini",
+        "opencode",
+        "zai",
+    ];
+
+    /// The provider's standard API-key environment variable, if it has one.
+    pub fn standard_api_key_env(&self) -> Option<&'static str> {
+        match self.provider.as_str() {
+            "openai" => Some("OPENAI_API_KEY"),
+            "anthropic" => Some("ANTHROPIC_API_KEY"),
+            "openrouter" => Some("OPENROUTER_API_KEY"),
+            "deepseek" => Some("DEEPSEEK_API_KEY"),
+            "groq" => Some("GROQ_API_KEY"),
+            "mistral" => Some("MISTRAL_API_KEY"),
+            "xai" => Some("XAI_API_KEY"),
+            "gemini" => Some("GEMINI_API_KEY"),
+            "opencode" => Some("OPENCODE_API_KEY"),
+            "zai" => Some("ZAI_API_KEY"),
+            _ => None,
+        }
+    }
+
+    /// The environment variable this config reads the key from, if any.
+    pub fn api_key_env_name(&self) -> Option<&str> {
+        self.api_key_env
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| self.standard_api_key_env())
+    }
+
+    /// Validates provider, model and the presence of the credential.
+    pub fn validate(&self) -> Result<(), String> {
+        if !Self::PROVIDERS.contains(&self.provider.as_str()) {
+            return Err(format!(
+                "unknown summary provider '{}' (supported: {})",
+                self.provider,
+                Self::PROVIDERS.join(", ")
+            ));
+        }
+        if self.model.trim().is_empty() {
+            return Err("summary.model must not be empty".to_string());
+        }
+        if self.max_tool_calls == 0 {
+            return Err("summary.max_tool_calls must be at least 1".to_string());
+        }
+        if self.max_documents == 0 {
+            return Err("summary.max_documents must be at least 1".to_string());
+        }
+        if self.base_url.is_some()
+            && !matches!(self.provider.as_str(), "openai" | "anthropic" | "ollama")
+        {
+            return Err(format!(
+                "summary.base_url is not supported for provider '{}'; set that provider's own base-URL environment variable instead",
+                self.provider
+            ));
+        }
+        if let Some(name) = self.api_key_env_name() {
+            if std::env::var_os(name).is_none() {
+                return Err(format!(
+                    "summary provider '{}' needs {name} in the environment",
+                    self.provider
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The parsed config file. All keys are optional so an empty file is valid.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct WatchConfig {
     #[serde(default)]
@@ -193,6 +306,9 @@ pub struct WatchConfig {
     pub exclude: Vec<String>,
     #[serde(default)]
     pub tray: TrayConfig,
+    /// Present only when the config opts into the summary agent.
+    #[serde(default)]
+    pub summary: Option<SummaryConfig>,
 }
 
 /// Resolved selectors, ready for scanning and watch registration.
@@ -235,9 +351,7 @@ pub struct LoadedConfig {
 /// profiles); otherwise the current platform's standard convention applies.
 pub fn config_path() -> PathBuf {
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
-        .filter_map(|(key, value)| {
-            Some((key.to_str()?.to_string(), value.to_str()?.to_string()))
-        })
+        .filter_map(|(key, value)| Some((key.to_str()?.to_string(), value.to_str()?.to_string())))
         .collect();
     resolve_config_path(Platform::current(), &env)
 }

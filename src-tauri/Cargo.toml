@@ -29,6 +29,10 @@ toml = "0.8"
 toml_edit = "0.22"
 walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
+rig-core = { version = "0.46", features = ["reqwest"] }
+rig-agent = "0.46"
+schemars = "1"
+similar = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
