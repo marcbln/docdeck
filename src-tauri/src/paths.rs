@@ -322,22 +322,38 @@ pub fn modified_millis(path: &Path) -> Option<u64> {
 /// forwards a command line, so `docdeck README.md` opens the file the caller
 /// meant instead of one relative to the already-running window.
 pub fn classify_args(args: &[String], cwd: &Path) -> Vec<CliEntry> {
-    args.iter()
+    classify_args_with_warnings(args, cwd).0
+}
+
+/// Like [`classify_args`], but also reports each path argument that did not
+/// resolve to an existing file or directory.
+///
+/// The caller prints the warnings *before* [`crate::detach`] redirects stdio,
+/// otherwise a typo in a shell command would silently open nothing.
+pub fn classify_args_with_warnings(args: &[String], cwd: &Path) -> (Vec<CliEntry>, Vec<String>) {
+    let mut entries = Vec::new();
+    let mut warnings = Vec::new();
+
+    for arg in args
+        .iter()
         .skip(1)
-        .map(|arg| arg.as_str())
+        .map(String::as_str)
         .filter(|arg| !arg.starts_with('-'))
-        .filter_map(|arg| {
-            let arg_path = Path::new(arg);
-            let candidate = if arg_path.is_absolute() {
-                arg_path.to_path_buf()
-            } else {
-                cwd.join(arg_path)
-            };
-            let path = candidate.canonicalize().ok()?;
-            Some(CliEntry {
+    {
+        let arg_path = Path::new(arg);
+        let candidate = if arg_path.is_absolute() {
+            arg_path.to_path_buf()
+        } else {
+            cwd.join(arg_path)
+        };
+        match candidate.canonicalize() {
+            Ok(path) => entries.push(CliEntry {
                 is_dir: path.is_dir(),
                 path: path.to_string_lossy().into_owned(),
-            })
-        })
-        .collect()
+            }),
+            Err(error) => warnings.push(format!("cannot open {arg}: {error}")),
+        }
+    }
+
+    (entries, warnings)
 }

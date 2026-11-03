@@ -65,9 +65,17 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 pub fn run() {
-    detach::detach_from_terminal();
-
     let argv: Vec<String> = env::args().collect();
+
+    // Report bad path arguments while stderr still points at the caller's
+    // terminal. `detach_from_terminal` redirects stdio to /dev/null, so doing
+    // this afterwards would swallow the message along with the typo.
+    let cwd = env::current_dir().unwrap_or_default();
+    for warning in paths::classify_args_with_warnings(&argv, &cwd).1 {
+        eprintln!("[docdeck] {warning}");
+    }
+
+    detach::detach_from_terminal();
 
     // Must happen before any window exists: WebKitGTK reads these once, while
     // it initialises, so setting them later has no effect.

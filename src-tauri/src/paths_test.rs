@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::paths::{
-        classify_args, expand_tilde, has_ignored_component_below, is_ignored_name, is_markdown,
-        is_noise_name, is_relevant, is_under, modified_millis, resolve_link, ExcludeSet,
+        classify_args, classify_args_with_warnings, expand_tilde, has_ignored_component_below,
+        is_ignored_name, is_markdown, is_noise_name, is_relevant, is_under, modified_millis,
+        resolve_link, ExcludeSet,
     };
     use std::collections::HashSet;
     use std::fs;
@@ -203,6 +204,28 @@ mod tests {
             file_entry.path,
             file.canonicalize().unwrap().to_string_lossy().into_owned()
         );
+    }
+
+    #[test]
+    fn classify_args_reports_paths_that_do_not_exist() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        fs::write(&file, "# plan").unwrap();
+
+        let argv = vec![
+            "docdeck".to_string(),
+            "--accelerated".to_string(),
+            "missing.md".to_string(),
+            file.to_string_lossy().into_owned(),
+        ];
+
+        let (entries, warnings) = classify_args_with_warnings(&argv, dir.path());
+
+        // Flags are never reported, the valid file still opens.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("missing.md"));
+        assert!(warnings[0].contains("cannot open"));
     }
 
     #[test]
