@@ -1,5 +1,6 @@
 //! Application wiring: builder, single-instance IPC, plugin setup.
 
+mod clipboard;
 mod commands;
 mod config;
 mod config_edit;
@@ -15,6 +16,8 @@ mod summary;
 mod tray;
 mod watcher;
 
+#[cfg(test)]
+mod clipboard_test;
 #[cfg(test)]
 mod commands_test;
 #[cfg(test)]
@@ -204,6 +207,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            clipboard::copy_file_reference,
             commands::load_file,
             commands::close_file,
             commands::load_watches,

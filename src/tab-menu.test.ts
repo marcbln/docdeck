@@ -29,13 +29,18 @@ function makeRect(
 
 describe("TabContextMenu", () => {
   let onCopyPath: ReturnType<typeof vi.fn<(path: string) => void>>;
+  let onCopyFile: ReturnType<typeof vi.fn<(path: string) => void>>;
   let menu: TabContextMenu;
   let trigger: HTMLButtonElement;
 
   beforeEach(() => {
     document.body.replaceChildren();
     onCopyPath = vi.fn();
-    menu = new TabContextMenu((path) => onCopyPath(path));
+    onCopyFile = vi.fn();
+    menu = new TabContextMenu(
+      (path) => onCopyPath(path),
+      (path) => onCopyFile(path),
+    );
 
     trigger = document.createElement("button");
     trigger.textContent = "tab";
@@ -55,19 +60,34 @@ describe("TabContextMenu", () => {
     expect(element?.getAttribute("role")).toBe("menu");
     expect(element?.getAttribute("aria-label")).toBe("Tab actions");
 
-    const item = element?.querySelector<HTMLButtonElement>(".tab-menu-item");
-    expect(item?.textContent).toBe("Copy absolute path");
-    expect(item?.getAttribute("role")).toBe("menuitem");
-    expect(document.activeElement).toBe(item);
+    const items = element?.querySelectorAll<HTMLButtonElement>(".tab-menu-item");
+    expect(items).toHaveLength(2);
+    expect(items?.[0]?.textContent).toBe("Copy absolute path");
+    expect(items?.[0]?.getAttribute("role")).toBe("menuitem");
+    expect(items?.[1]?.textContent).toBe("Copy file");
+    expect(items?.[1]?.getAttribute("role")).toBe("menuitem");
+    expect(document.activeElement).toBe(items?.[0]);
     expect(menu.isOpen).toBe(true);
   });
 
-  it("reports the path and closes when the item is clicked", () => {
+  it("reports the path and closes when the path item is clicked", () => {
     menu.open("/tmp/a.md", { x: 10, y: 20 }, trigger);
     document.querySelector<HTMLButtonElement>(".tab-menu-item")?.click();
 
     expect(onCopyPath).toHaveBeenCalledTimes(1);
     expect(onCopyPath).toHaveBeenCalledWith("/tmp/a.md");
+    expect(onCopyFile).not.toHaveBeenCalled();
+    expect(document.querySelector(".tab-menu")).toBeNull();
+    expect(menu.isOpen).toBe(false);
+  });
+
+  it("reports the path and closes when the file item is clicked", () => {
+    menu.open("/tmp/a.md", { x: 10, y: 20 }, trigger);
+    document.querySelectorAll<HTMLButtonElement>(".tab-menu-item")[1]?.click();
+
+    expect(onCopyFile).toHaveBeenCalledTimes(1);
+    expect(onCopyFile).toHaveBeenCalledWith("/tmp/a.md");
+    expect(onCopyPath).not.toHaveBeenCalled();
     expect(document.querySelector(".tab-menu")).toBeNull();
     expect(menu.isOpen).toBe(false);
   });

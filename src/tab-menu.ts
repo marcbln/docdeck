@@ -9,6 +9,9 @@ const ANCHOR_GAP = 2;
 
 export type CopyPathHandler = (path: string) => void;
 
+/** Called when the user asks to copy the tab's file reference. */
+export type CopyFileHandler = (path: string) => void;
+
 /**
  * Singleton context menu for the tab bar.
  *
@@ -39,6 +42,7 @@ export class TabContextMenu {
 
   constructor(
     private readonly onCopyPath: CopyPathHandler,
+    private readonly onCopyFile: CopyFileHandler,
     private readonly host: HTMLElement = document.body,
   ) {}
 
@@ -62,18 +66,24 @@ export class TabContextMenu {
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "Tab actions");
 
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "tab-menu-item";
-    item.setAttribute("role", "menuitem");
-    item.textContent = "Copy absolute path";
-    item.addEventListener("click", () => {
-      const target = this.path;
-      this.close(true);
-      if (target !== null) this.onCopyPath(target);
-    });
+    const addItem = (label: string, action: CopyPathHandler): HTMLButtonElement => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "tab-menu-item";
+      item.setAttribute("role", "menuitem");
+      item.textContent = label;
+      item.addEventListener("click", () => {
+        const target = this.path;
+        this.close(true);
+        if (target !== null) action(target);
+      });
+      menu.appendChild(item);
+      return item;
+    };
 
-    menu.appendChild(item);
+    const firstItem = addItem("Copy absolute path", this.onCopyPath);
+    addItem("Copy file", this.onCopyFile);
+
     this.menu = menu;
     this.path = path;
     this.returnFocus = returnFocus;
@@ -88,7 +98,7 @@ export class TabContextMenu {
     window.addEventListener("blur", this.onViewportChange);
     window.addEventListener("resize", this.onViewportChange);
 
-    item.focus();
+    firstItem.focus();
   }
 
   /** Removes the menu and every listener it installed. */

@@ -267,9 +267,14 @@ class AppState {
       hasDocument: () => this.activePath !== null,
     });
 
-    this.tabMenu = new TabContextMenu((path) => {
-      void this.copyTabPath(path);
-    });
+    this.tabMenu = new TabContextMenu(
+      (path) => {
+        void this.copyTabPath(path);
+      },
+      (path) => {
+        void this.copyTabFile(path);
+      },
+    );
 
     // Expanding or folding the metadata table changes which text is visible.
     // `toggle` does not bubble, so listen in the capture phase.
@@ -1100,6 +1105,16 @@ class AppState {
       copied ? "Path copied" : "Copy failed",
       copied ? "info" : "error",
     );
+  }
+
+  /** Copies a document as a file reference for pasting as an attachment. */
+  private async copyTabFile(path: string): Promise<void> {
+    try {
+      await invoke("copy_file_reference", { path });
+      this.toast.show("File copied", "info");
+    } catch (error) {
+      this.toast.show(`Copy failed: ${describeError(error)}`, "error");
+    }
   }
 
   // -- watch registry and inbox ---------------------------------------------

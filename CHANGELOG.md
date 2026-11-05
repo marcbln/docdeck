@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Copy a file from the tab menu**: right-clicking a tab or a sidebar row now
+  offers **Copy file** next to **Copy absolute path**. It writes a
+  `file://` reference with the `text/uri-list` target, so the document can be
+  pasted into a file manager or an upload control as a file. On Linux this uses
+  `xclip` (X11) or `wl-copy` (Wayland).
 - **Cycle through tabs**: `Ctrl+Tab` and `Ctrl+Shift+Tab` step forward and
   backward through the open documents, browser-style. The order matches the
   sidebar (including Auto-Sort) and wraps at both ends.

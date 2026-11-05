@@ -34,8 +34,9 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   in appears as new unread work.
 - **Single left sidebar** — **Open documents** sits above a browsable document
   list. Open rows replace the old tab strip: activate one to switch documents,
-  close it with `×`, or copy its path from the context menu. The sidebar is
-  always present, so document switching can never disappear.
+  close it with `×`, or copy its absolute path or the file itself from the
+  context menu. The sidebar is always present, so document switching can never
+  disappear.
 - **Browse all or recently changed** — the lower list switches between the
   complete watched inventory and **Recently changed**, a session-scoped,
   de-duplicated activity list ordered by the moment docdeck observed each write.
@@ -452,6 +453,7 @@ src/                  Frontend — document state, sidebar, markdown rendering
   style.css           Catppuccin Mocha + Latte, sidebar, markdown overrides
 src-tauri/src/
   lib.rs              Builder, single-instance IPC, plugin wiring
+  clipboard.rs        File-reference clipboard writes (text/uri-list)
   commands.rs         File/watch commands plus config read/save/reload
   config.rs           TOML parsing, platform paths, revisions, expansion, caps
   config_edit.rs      Comment-preserving TOML edits and atomic writes
