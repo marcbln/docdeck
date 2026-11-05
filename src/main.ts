@@ -48,6 +48,7 @@ import {
 } from "./preferences";
 import { fileName, isUnderAny } from "./project";
 import { scrollToAnchor } from "./scroll";
+import { adjacentTabPath, tabCycleDirection, type TabCycleDirection } from "./tab-cycle";
 import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
 import { extractHeadings } from "./toc";
@@ -548,14 +549,34 @@ class AppState {
     this.acks.acknowledge(path, modifiedTime);
   }
 
-  /** Reopens the most recently closed tab, like a browser's Ctrl+Shift+T. */
+  /** Browser-style tab shortcuts: Ctrl+Shift+T reopens, Ctrl+Tab cycles. */
   private bindShortcuts(): void {
     window.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
-      if (!isReopenClosedTabShortcut(event)) return;
+
+      if (isReopenClosedTabShortcut(event)) {
+        event.preventDefault();
+        void this.reopenClosedTab();
+        return;
+      }
+
+      const direction = tabCycleDirection(event);
+      if (direction === null) return;
       event.preventDefault();
-      void this.reopenClosedTab();
+      this.cycleTab(direction);
     });
+  }
+
+  /** Activates the neighbouring tab in the same order the sidebar shows. */
+  private cycleTab(direction: TabCycleDirection): void {
+    const paths = buildOpenRows(
+      this.tabs.values(),
+      this.activePath,
+      this.autoSort,
+    ).map((row) => row.path);
+    const target = adjacentTabPath(paths, this.activePath, direction);
+    if (target === null || target === this.activePath) return;
+    void this.setActiveTab(target);
   }
 
   /**

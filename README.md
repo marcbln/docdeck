@@ -69,6 +69,9 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   the most recently closed document, browser-style. Repeated presses walk back
   through the session's closed documents; documents deleted in the meantime are
   skipped after reporting the read error.
+- **Cycle through tabs** — `Ctrl+Tab` and `Ctrl+Shift+Tab` step forward and
+  backward through the open documents, wrapping at the ends and following the
+  order shown in the sidebar.
 - **Single-instance CLI** — running `docdeck <file>` or `docdeck <folder>` from any
   terminal reaches the *running* window instead of starting a second process.
 - **Survives the terminal** — release builds launched from a shell detach into
@@ -339,6 +342,7 @@ is the triage surface.
 | Click an open row | Activate it and clear its unread dot |
 | `×` on an open row | Close it and release its file watch (watched folders stay live) |
 | `Ctrl+Shift+T` / `Cmd+Shift+T` | Reopen the most recently closed document |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous open document (wraps around) |
 
 ### Tray icon and notifications
 
@@ -423,6 +427,7 @@ src/                  Frontend — document state, sidebar, markdown rendering
   toc.ts              Heading extraction and GitHub-compatible slugs
   toc-panel.ts        Outline sidebar, scroll-spy, jump-to-heading
   tab-menu.ts         Right-click menu for document rows: positioning, dismissal, focus
+  tab-cycle.ts        Browser-style Ctrl+Tab cycling order and shortcut detection
   closed-tabs.ts      Session stack of closed paths and the reopen shortcut
   theme.ts            Stylesheet swap, Catppuccin Latte, mermaid theming
   toast.ts            Transient themed status messages

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cycle through tabs**: `Ctrl+Tab` and `Ctrl+Shift+Tab` step forward and
+  backward through the open documents, browser-style. The order matches the
+  sidebar (including Auto-Sort) and wraps at both ends.
 - **Dismiss browse rows with the middle mouse button**: middle-clicking a row
   removes it from the list on screen. A Recently changed row is acknowledged and
   returns only if the document changes again; an All documents row is hidden for
