@@ -46,16 +46,7 @@ function state(overrides: Partial<SidebarViewState> = {}): SidebarViewState {
     openPaths: new Set(),
     activePath: null,
     activeUpdatePath: null,
-    status: {
-      configPath: "/home/u/.config/docdeck/config.toml",
-      configFound: true,
-      error: null,
-      warnings: [],
-      truncated: false,
-      loading: false,
-      progress: null,
-      lastReload: null,
-    },
+    configHintPath: null,
     openCollapsed: false,
     browseCollapsed: false,
     canUndo: false,
@@ -425,86 +416,72 @@ describe("SidebarPanel", () => {
     ).toBe(false);
   });
 
-  it("updates the status line without replacing open rows", () => {
-    const { root, panel } = mount(
-      state({ openRows: [openRow("/a/plan.md")] }),
-    );
-    const row = root.querySelector(".sidebar-row");
-
-    panel.setProgress({ path: "/topdata/shop/_ai", directories: 42, files: 7 });
-
-    expect(root.querySelector(".sidebar-row")).toBe(row);
-    expect(root.querySelector(".inbox-loading")?.textContent).toContain(
-      "/topdata/shop/_ai",
-    );
-  });
-
-  it("shows a config error and a setup hint", () => {
+  it("keeps scan and watch chatter out of the sidebar", () => {
     const { root } = mount(
       state({
-        status: {
-          configPath: "/home/u/.config/docdeck/config.toml",
-          configFound: false,
-          error: null,
-          warnings: [],
-          truncated: false,
-          loading: false,
-          progress: null,
-          lastReload: null,
-        },
+        configHintPath: null,
+        recent: [entry("/a/new.md", NOW)],
       }),
     );
 
-    expect(root.querySelector(".inbox-hint")?.textContent).toContain(
+    const text = root.textContent ?? "";
+    expect(text).not.toContain("Scanning");
+    expect(text).not.toContain("Configuration reloaded");
+    expect(text).not.toContain("warning");
+    expect(text).not.toContain("truncated");
+    expect(text).not.toContain("Last reload failed");
+  });
+
+  it("shows the setup hint with the path and example TOML", () => {
+    const { root } = mount(
+      state({ configHintPath: "/home/u/.config/docdeck/config.toml" }),
+    );
+
+    const hint = root.querySelector(".inbox-hint");
+    expect(hint?.textContent).toContain(
       "/home/u/.config/docdeck/config.toml",
     );
+    expect(hint?.querySelector("code")?.textContent).toContain("watch =");
+  });
+
+  it("suppresses the hint when configHintPath is null", () => {
+    const { root } = mount(state({ configHintPath: null }));
+    expect(root.querySelector(".inbox-hint")).toBeNull();
+  });
+
+  it("renders the Open/Browse split separator", () => {
+    const { root } = mount();
+    const split = root.querySelector<HTMLElement>(".sidebar-split")!;
+
+    expect(split).not.toBeNull();
+    expect(split.getAttribute("role")).toBe("separator");
+    expect(split.getAttribute("aria-orientation")).toBe("horizontal");
+    expect(split.getAttribute("aria-label")).toContain("Open documents");
+    expect(split.getAttribute("aria-valuemin")).toBe("15");
+    expect(split.getAttribute("aria-valuemax")).toBe("85");
+    expect(split.getAttribute("aria-valuenow")).toBe("50");
+  });
+
+  it("makes the split inert when a section is collapsed", () => {
+    const { root } = mount(state({ openCollapsed: true }));
+    const split = root.querySelector<HTMLElement>(".sidebar-split")!;
+
+    expect(split.hidden).toBe(true);
+    expect(split.tabIndex).toBe(-1);
+    expect(split.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("applies split size updates", () => {
+    const { root, panel } = mount();
+    panel.setSidebarSplit(35);
+
+    const split = root.querySelector<HTMLElement>(".sidebar-split")!;
+    expect(split.getAttribute("aria-valuenow")).toBe("35");
   });
 
   it("releases listeners on destroy", () => {
     const { panel } = mount();
     expect(() => panel.destroy()).not.toThrow();
-  });
-
-  it("renders the last reload outcome near the config status", () => {
-    const { root } = mount(
-      state({
-        status: {
-          ...state().status,
-          lastReload: {
-            at: NOW - 5_000,
-            ok: true,
-            error: null,
-            warnings: [],
-            truncated: false,
-          },
-        },
-      }),
-    );
-
-    expect(root.querySelector(".inbox-reload")?.textContent).toContain(
-      "Configuration reloaded",
-    );
-  });
-
-  it("renders a failed reload with its error", () => {
-    const { root } = mount(
-      state({
-        status: {
-          ...state().status,
-          lastReload: {
-            at: NOW,
-            ok: false,
-            error: "expected value at line 1",
-            warnings: [],
-            truncated: false,
-          },
-        },
-      }),
-    );
-
-    expect(root.querySelector(".inbox-reload")?.textContent).toContain(
-      "Last reload failed: expected value at line 1",
-    );
   });
 
   it("emits filter changes and clears with Escape", () => {

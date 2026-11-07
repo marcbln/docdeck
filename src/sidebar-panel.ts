@@ -1,8 +1,6 @@
 import { InboxBrowser } from "./browse-modal";
-import type { InboxEntry, InboxStatus, ScanProgress } from "./inbox-model";
-import { compactPath } from "./project";
+import type { InboxEntry } from "./inbox-model";
 import type { SummaryStatus } from "./summary-model";
-import { formatRelativeTime } from "./relative-time";
 import { bindInboxRow, createInboxRow } from "./sidebar-rows";
 import type { BrowseMode, OpenRow } from "./sidebar-model";
 import { VirtualList } from "./virtual-list";
@@ -17,7 +15,8 @@ export interface SidebarViewState {
   activePath: string | null;
   /** Path playing the brief active-write acknowledgement pulse, if any. */
   activeUpdatePath: string | null;
-  status: InboxStatus;
+  /** Actionable setup hint path, or null when no hint should render. */
+  configHintPath: string | null;
   openCollapsed: boolean;
   browseCollapsed: boolean;
   canUndo: boolean;
@@ -81,10 +80,14 @@ export class SidebarPanel {
   private readonly popoutBtn: HTMLButtonElement;
   private readonly filterInput: HTMLInputElement;
   private readonly filterClear: HTMLButtonElement;
-  private readonly statusHost: HTMLDivElement;
+  private readonly hintHost: HTMLDivElement;
   private readonly browseScroll: HTMLDivElement;
   private readonly browseList: HTMLUListElement;
   private readonly browseEmpty: HTMLParagraphElement;
+
+  private readonly splitHost: HTMLDivElement;
+  private splitPercent = 50;
+  private browseVisible = true;
 
   private readonly virtual: VirtualList<InboxEntry>;
   private browser: InboxBrowser | null = null;
@@ -101,16 +104,7 @@ export class SidebarPanel {
       openPaths: new Set(),
       activePath: null,
       activeUpdatePath: null,
-      status: {
-        configPath: "",
-        configFound: true,
-        error: null,
-        warnings: [],
-        truncated: false,
-        loading: true,
-        progress: null,
-        lastReload: null,
-      },
+      configHintPath: null,
       openCollapsed: false,
       browseCollapsed: false,
       canUndo: false,
@@ -229,8 +223,8 @@ export class SidebarPanel {
     this.filterClear.hidden = true;
     filterRow.append(filterLabel, this.filterInput, this.filterClear);
 
-    this.statusHost = document.createElement("div");
-    this.statusHost.className = "inbox-status";
+    this.hintHost = document.createElement("div");
+    this.hintHost.className = "sidebar-hint-host";
 
     this.browseScroll = document.createElement("div");
     this.browseScroll.className = "sidebar-browse-scroll";
@@ -242,14 +236,31 @@ export class SidebarPanel {
     this.browseBody.append(
       toolbar,
       filterRow,
-      this.statusHost,
+      this.hintHost,
       this.browseScroll,
       this.browseEmpty,
     );
 
     this.browseSection.append(this.browseHeader, this.browseBody);
 
-    this.root.replaceChildren(this.openSection, this.browseSection);
+    this.splitHost = document.createElement("div");
+    this.splitHost.className = "sidebar-split";
+    this.splitHost.setAttribute("role", "separator");
+    this.splitHost.setAttribute("aria-orientation", "horizontal");
+    this.splitHost.setAttribute(
+      "aria-label",
+      "Resize the Open documents and Browse sections",
+    );
+    this.splitHost.setAttribute("aria-valuemin", "15");
+    this.splitHost.setAttribute("aria-valuemax", "85");
+    this.splitHost.setAttribute("aria-valuenow", "50");
+    this.splitHost.tabIndex = 0;
+
+    this.root.replaceChildren(
+      this.openSection,
+      this.splitHost,
+      this.browseSection,
+    );
 
     this.virtual = new VirtualList<InboxEntry>(this.browseList, this.browseScroll, {
       createRow: createInboxRow,
@@ -272,12 +283,19 @@ export class SidebarPanel {
     this.state = state;
     this.renderOpenSection();
     this.renderBrowseSection();
+    this.renderSplit();
   }
 
-  /** Updates only the scan status line; the row lists are untouched. */
-  setProgress(progress: ScanProgress | null): void {
-    this.state = { ...this.state, status: { ...this.state.status, progress } };
-    this.renderStatus();
+  /** The Open/Browse boundary, wired to a `LayoutResizer` by `main.ts`. */
+  get splitHandle(): HTMLElement {
+    return this.splitHost;
+  }
+
+  /** Applies the Open documents share of the sidebar's usable height. */
+  setSidebarSplit(percent: number): void {
+    this.splitPercent = Math.min(85, Math.max(15, percent));
+    this.splitHost.setAttribute("aria-valuenow", String(this.splitPercent));
+    this.applySplit();
   }
 
   /** Repaints after being shown or after a window resize. */
@@ -288,7 +306,9 @@ export class SidebarPanel {
 
   /** Shows or hides the browse section; Open Documents is never hidden. */
   setBrowseVisible(visible: boolean): void {
+    this.browseVisible = visible;
     this.browseSection.hidden = !visible;
+    this.renderSplit();
   }
 
   destroy(): void {
@@ -587,9 +607,43 @@ export class SidebarPanel {
     this.summaryBtn.title = this.summaryTitle();
     this.popoutBtn.disabled = this.state.inventory.length === 0;
 
-    this.renderStatus();
+    this.renderHint();
     this.renderBrowseEmpty(items);
     this.virtual.setItems(this.state.browseCollapsed ? [] : items);
+  }
+
+  private renderSplit(): void {
+    const inert =
+      !this.browseVisible ||
+      this.state.openCollapsed ||
+      this.state.browseCollapsed;
+
+    this.splitHost.hidden = inert;
+    this.splitHost.tabIndex = inert ? -1 : 0;
+    if (inert) {
+      this.splitHost.setAttribute("aria-disabled", "true");
+    } else {
+      this.splitHost.removeAttribute("aria-disabled");
+    }
+
+    this.applySplit();
+  }
+
+  private applySplit(): void {
+    const stacked =
+      this.state.openCollapsed || this.state.browseCollapsed || !this.browseVisible;
+    this.openSection.style.flexBasis = stacked ? "auto" : `${this.splitPercent}%`;
+  }
+
+  /** Renders only the actionable first-run hint; all watch chatter lives in
+   *  the status bar and event log. */
+  private renderHint(): void {
+    const configPath = this.state.configHintPath;
+    if (configPath === null) {
+      this.hintHost.replaceChildren();
+      return;
+    }
+    this.hintHost.replaceChildren(this.setupHint(configPath));
   }
 
   private renderBrowseEmpty(items: readonly InboxEntry[]): void {
@@ -646,61 +700,6 @@ export class SidebarPanel {
     }`;
   }
 
-  private renderStatus(): void {
-    const fragment = document.createDocumentFragment();
-    const status = this.state.status;
-
-    if (status.loading) {
-      fragment.append(this.scanMessage(status.progress));
-    } else {
-      if (status.progress) {
-        fragment.append(this.scanMessage(status.progress));
-      }
-      if (status.error) {
-        fragment.append(
-          this.message(`Config error: ${status.error}`, "inbox-error"),
-        );
-      } else if (!status.configFound) {
-        fragment.append(this.setupHint(status.configPath));
-      }
-
-      if (status.lastReload) {
-        fragment.append(this.reloadMessage(status.lastReload));
-      }
-
-      if (status.warnings.length > 0) {
-        fragment.append(this.warningList(status.warnings));
-      }
-      if (status.truncated) {
-        fragment.append(
-          this.message(
-            "Some paths were skipped at the configured limits; see the warnings.",
-            "inbox-truncated",
-          ),
-        );
-      }
-    }
-
-    this.statusHost.replaceChildren(fragment);
-  }
-
-  private scanMessage(progress: ScanProgress | null): HTMLElement {
-    if (!progress) {
-      return this.message("Scanning watched paths…", "inbox-loading");
-    }
-
-    const shown = compactPath(progress.path);
-    const folders = `${progress.directories} ${
-      progress.directories === 1 ? "folder" : "folders"
-    }`;
-    const files = `${progress.files} ${progress.files === 1 ? "file" : "files"}`;
-    const line = this.message(
-      `Scanning ${shown} (${folders} · ${files})`,
-      "inbox-loading",
-    );
-    line.title = progress.path;
-    return line;
-  }
 
   private setupHint(configPath: string): HTMLElement {
     const hint = document.createElement("div");
@@ -716,49 +715,4 @@ export class SidebarPanel {
     return hint;
   }
 
-  private reloadMessage(reload: NonNullable<InboxStatus["lastReload"]>): HTMLElement {
-    if (!reload.ok) {
-      const line = this.message(
-        `Last reload failed: ${reload.error ?? "unknown error"}`,
-        "inbox-error inbox-reload",
-      );
-      return line;
-    }
-    const when = formatRelativeTime(reload.at, this.state.now);
-    const parts = [`Configuration reloaded ${when}.`];
-    if (reload.warnings.length > 0) {
-      parts.push(
-        `${reload.warnings.length} warning${reload.warnings.length === 1 ? "" : "s"}.`,
-      );
-    }
-    if (reload.truncated) parts.push("Results were truncated.");
-    return this.message(parts.join(" "), "inbox-loading inbox-reload");
-  }
-
-  private warningList(warnings: string[]): HTMLElement {
-    const details = document.createElement("details");
-    details.className = "inbox-warnings";
-
-    const summary = document.createElement("summary");
-    summary.textContent = `${warnings.length} warning${
-      warnings.length === 1 ? "" : "s"
-    }`;
-
-    const list = document.createElement("ul");
-    for (const warning of warnings) {
-      const item = document.createElement("li");
-      item.textContent = warning;
-      list.append(item);
-    }
-
-    details.append(summary, list);
-    return details;
-  }
-
-  private message(text: string, className: string): HTMLElement {
-    const element = document.createElement("p");
-    element.className = className;
-    element.textContent = text;
-    return element;
-  }
 }

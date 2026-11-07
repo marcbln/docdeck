@@ -1,3 +1,9 @@
+import {
+  DEFAULT_LAYOUT,
+  validateLayout,
+  type LayoutPreferences,
+} from "./layout-model";
+
 /** Single storage key. The version suffix lets a future schema change coexist
  *  with an old key rather than migrating it in place. */
 const STORAGE_KEY = "docdeck.preferences.v1";
@@ -16,6 +22,8 @@ export interface Preferences {
   browseMode: BrowseMode;
   openSectionCollapsed: boolean;
   browseSectionCollapsed: boolean;
+  /** Remembered pane sizes; validated per field on load. */
+  layout: LayoutPreferences;
 }
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
@@ -26,7 +34,13 @@ export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   browseMode: "recent",
   openSectionCollapsed: false,
   browseSectionCollapsed: false,
+  layout: DEFAULT_LAYOUT,
 });
+
+/** A mutable copy of the defaults (the layout object is frozen). */
+function defaults(): Preferences {
+  return { ...DEFAULT_PREFERENCES, layout: { ...DEFAULT_LAYOUT } };
+}
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === "dark" || value === "light";
@@ -46,17 +60,17 @@ function isBrowseMode(value: unknown): value is BrowseMode {
  * value costs the reader that preference, not all three.
  */
 function decode(raw: string | null): Preferences {
-  if (raw === null) return { ...DEFAULT_PREFERENCES };
+  if (raw === null) return defaults();
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { ...DEFAULT_PREFERENCES };
+    return defaults();
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    return { ...DEFAULT_PREFERENCES };
+    return defaults();
   }
 
   const record = parsed as Record<string, unknown>;
@@ -87,6 +101,7 @@ function decode(raw: string | null): Preferences {
       typeof record.browseSectionCollapsed === "boolean"
         ? record.browseSectionCollapsed
         : DEFAULT_PREFERENCES.browseSectionCollapsed,
+    layout: validateLayout(record.layout),
   };
 }
 
@@ -95,7 +110,7 @@ export function loadPreferences(): Preferences {
     return decode(window.localStorage.getItem(STORAGE_KEY));
   } catch {
     // Storage can be unavailable (private mode, restricted webview context).
-    return { ...DEFAULT_PREFERENCES };
+    return defaults();
   }
 }
 

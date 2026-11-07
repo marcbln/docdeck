@@ -16,6 +16,13 @@
   --find-match-fg: #1e1e2e;
   --find-current-bg: #fab387;
   --find-current-fg: #1e1e2e;
+
+  /* Pane geometry. `main.ts` overwrites these from the effective layout. */
+  --sidebar-width: 300px;
+  --toc-width: 240px;
+  --event-log-height: 200px;
+  --sidebar-split: 50;
+
   color-scheme: dark;
 }
 
@@ -76,6 +83,94 @@ body {
   display: none !important;
 }
 
+/* Resize boundaries. Each handle occupies its own 5 px grid track (or the
+   sidebar split row) and has a larger transparent hit area via ::before. */
+#sidebar-resizer {
+  grid-area: sidebar-resizer;
+}
+
+#toc-resizer {
+  grid-area: toc-resizer;
+}
+
+/* The outline's handle follows its pane's visibility even before `main.ts`
+   runs its first layout pass. */
+#toc-panel[hidden] + #toc-resizer {
+  display: none;
+}
+
+#event-log-resizer {
+  grid-area: log-resizer;
+}
+
+#event-log {
+  grid-area: log;
+}
+
+#status-bar {
+  grid-area: status;
+}
+
+.layout-resizer {
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  border: none;
+  padding: 0;
+  touch-action: none;
+}
+
+.layout-resizer::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+
+.layout-resizer::after {
+  content: "";
+  position: absolute;
+  background: var(--border-color);
+  transition: background 0.12s ease-in-out;
+}
+
+.layout-resizer--vertical {
+  width: 5px;
+  min-width: 5px;
+  cursor: col-resize;
+}
+
+.layout-resizer--vertical::after {
+  inset: 0 2px;
+}
+
+.layout-resizer--horizontal {
+  height: 5px;
+  min-height: 5px;
+  cursor: row-resize;
+}
+
+.layout-resizer--horizontal::after {
+  inset: 2px 0;
+}
+
+.layout-resizer:hover::after,
+.layout-resizer:focus-visible::after {
+  background: var(--accent-color);
+}
+
+.layout-resizer:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
+.layout-resizer[hidden] {
+  display: none;
+}
+
+.layout-resizer[aria-disabled="true"] {
+  cursor: default;
+}
+
 /* --------------------------------------------------------------------------
    Application shell
 
@@ -86,11 +181,14 @@ body {
 
 .app-layout {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   grid-template-areas:
-    "header header header"
-    "sidebar toc   content";
+    "header header header header header"
+    "sidebar sidebar-resizer toc toc-resizer content"
+    "log-resizer log-resizer log-resizer log-resizer log-resizer"
+    "log log log log log"
+    "status status status status status";
   height: 100vh;
   width: 100vw;
 }
@@ -100,7 +198,7 @@ body {
    space without a reflow of its own internals. */
 #toc-panel {
   grid-area: toc;
-  width: 240px;
+  width: var(--toc-width);
   min-width: 0;
   overflow-y: auto;
   background-color: var(--bg-secondary);
@@ -118,7 +216,7 @@ body {
 
 #sidebar {
   grid-area: sidebar;
-  width: 300px;
+  width: var(--sidebar-width);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -138,10 +236,10 @@ body {
 }
 
 .sidebar-section--open {
-  /* Never shrink: the browse list can hold thousands of rows, and its intrinsic
-     height must not collapse this section to zero (which let it overlap Browse). */
+  /* Height is driven by the Open/Browse split (`flex-basis` set inline by
+     SidebarPanel); a collapsed section falls back to its header height. */
   flex: 0 0 auto;
-  max-height: 45%;
+  min-height: 0;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -1293,10 +1391,7 @@ body {
 
 .inbox-hint,
 .inbox-error,
-.inbox-empty,
-.inbox-loading,
-.inbox-truncated,
-.inbox-warnings {
+.inbox-empty {
   padding: 8px 12px;
   color: var(--text-muted);
   font-size: 12px;
@@ -1314,15 +1409,6 @@ body {
   background-color: var(--bg-elevated);
   white-space: pre;
   overflow-x: auto;
-}
-
-.inbox-warnings summary {
-  cursor: pointer;
-}
-
-.inbox-warnings ul {
-  margin: 6px 0 0;
-  padding-left: 16px;
 }
 
 /* All-files modal — the complete inventory, windowed to the visible rows. */
@@ -1736,10 +1822,6 @@ body {
   border-color: var(--accent-color);
 }
 
-.inbox-reload {
-  opacity: 0.9;
-}
-
 .config-overlay {
   position: fixed;
   inset: 0;
@@ -1917,4 +1999,268 @@ body {
   gap: 8px;
   border-top: 1px solid var(--border-color);
   padding-top: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Status bar
+
+   One always-present row at the bottom. The location segment shrinks and
+   ellipsizes first; the counts and warning chip keep their width.
+   -------------------------------------------------------------------------- */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 10px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+.status-bar-location {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-bar-counts {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.status-bar[data-severity="warning"] .status-bar-location {
+  color: var(--dot-color);
+}
+
+.status-bar[data-severity="error"] .status-bar-location {
+  color: var(--danger-color);
+}
+
+.status-bar-chip {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 9px;
+  background: var(--dot-color);
+  color: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status-bar-chip:hover,
+.status-bar-chip:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.status-bar-chip[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Event log — docked above the status bar
+   -------------------------------------------------------------------------- */
+
+.event-log {
+  display: flex;
+  flex-direction: column;
+  height: var(--event-log-height);
+  min-height: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.event-log[hidden] {
+  display: none;
+}
+
+.event-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.event-log-title {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.event-log-filters {
+  display: flex;
+  gap: 2px;
+}
+
+.event-log-filter,
+.event-log-clear,
+.event-log-close {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.event-log-filter:hover,
+.event-log-clear:hover,
+.event-log-close:hover,
+.event-log-filter:focus-visible,
+.event-log-clear:focus-visible,
+.event-log-close:focus-visible {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.event-log-filter.active {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.event-log-clear {
+  margin-left: auto;
+}
+
+.event-log-close {
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.event-log-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.event-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+}
+
+.event-log-row {
+  display: grid;
+  grid-template-columns: 64px 64px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.event-log-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-log-severity {
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+
+.event-log-row--warning .event-log-severity {
+  color: var(--dot-color);
+  font-weight: 700;
+}
+
+.event-log-row--error .event-log-severity {
+  color: var(--danger-color);
+  font-weight: 700;
+}
+
+.event-log-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.event-log-detail {
+  grid-column: 3;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.event-log-empty {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.event-log-new {
+  align-self: center;
+  margin: 0 10px 6px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 9px;
+  background: var(--accent-color);
+  color: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.event-log-new[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Open/Browse split inside the sidebar
+   -------------------------------------------------------------------------- */
+
+.sidebar-split {
+  position: relative;
+  flex: 0 0 5px;
+  min-height: 5px;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.sidebar-split::before {
+  content: "";
+  position: absolute;
+  inset: -3px 0;
+}
+
+.sidebar-split::after {
+  content: "";
+  position: absolute;
+  inset: 2px 0;
+  background: var(--border-color);
+  transition: background 0.12s ease-in-out;
+}
+
+.sidebar-split:hover::after,
+.sidebar-split:focus-visible::after {
+  background: var(--accent-color);
+}
+
+.sidebar-split:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
+.sidebar-split[hidden] {
+  display: none;
+}
+
+.sidebar-split[aria-disabled="true"] {
+  cursor: default;
 }

@@ -101,6 +101,25 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   and a `n/m` counter tracks your position. `Enter`/`Shift+Enter` step through
   matches, `Aa` toggles case sensitivity, and the search survives live reloads
   without losing your place.
+- **Descriptive window title** — the OS title reads
+  `project — filename — docdeck` for a document under a project's `_ai` folder,
+  `filename — docdeck` without a project, and exactly `docdeck` when no document
+  is open. It follows tab activation, opening, closing and renames.
+- **One-line status bar** — a quiet footer reports live scan progress, the most
+  recent watch event and a warning count. Watch diagnostics no longer appear in
+  the left navigation, which keeps only document lists and the actionable
+  "no configuration" hint.
+- **Docked event log** — click the status bar (or press `Ctrl+\``) to open a
+  PhpStorm-style log above the status line. It records scan/reload lifecycle
+  events with timestamps, severity and full warning text, offers an
+  **All**/**Warnings** filter and **Clear**, follows new entries without moving
+  a paused scroll position, and closes on `Escape`. The log is session-only and
+  capped at the 500 most recent entries.
+- **Resizable panes** — drag the sidebar width, outline width, event-log height
+  or the Open/Browse split; double-click a boundary to restore its default, or
+  focus it and use the arrow keys, `Home`/`End`, `Enter`/`Space`. Sizes persist
+  through `docdeck.preferences.v1`. The window minimum width is 700 px so both
+  side panes and the document area keep a usable size.
 - **Light and dark themes** — Catppuccin Mocha and Latte, covering the app
   chrome, GitHub markdown styles, syntax highlighting and Mermaid diagrams.
 
@@ -381,9 +400,15 @@ reason to stderr and runs as a plain window — the tray is never fatal.
 
 ### Preferences
 
-Theme, outline, frontmatter, browse visibility, browse mode and the collapsed
-state of each sidebar section are stored under the `docdeck.preferences.v1` key
-in `localStorage`, so docdeck reopens the way you left it. Per-document review
+Theme, outline, frontmatter, browse visibility, browse mode, the collapsed
+state of each sidebar section and the four pane sizes (`layout.sidebarWidth`,
+`layout.tocWidth`, `layout.eventLogHeight`, `layout.sidebarSplit`) are stored
+under the `docdeck.preferences.v1` key in `localStorage`, so docdeck reopens the
+way you left it. Each layout field is validated independently; a missing or
+out-of-range value falls back to its default without discarding the others, and
+a window resize clamps the effective size without overwriting the stored
+preference. Event-log visibility, its filter and follow state are session-only
+and never persisted. Per-document review
 acknowledgements use `docdeck.acknowledgements.v1` (`{ version: 1, entries: {
 "<path>": { mtime, at } } }`); corrupt or wrong-version history is treated as a
 first launch and one bad entry never discards the rest. The browse filter,
@@ -492,6 +517,11 @@ reload result is ordered by a monotonic generation; older results are ignored.
 ## Known limitations
 
 - **Renders markdown only.** No editing.
+- **Wayland header bars may not repaint the title.** On some Linux Wayland
+  compositors the compositor-drawn title bar keeps its old text after the window
+  title changes, even though the taskbar title and `document.title` update. This
+  is an upstream Tauri/WebKitGTK limitation (Tauri #13749); X11, macOS and
+  Windows update normally.
 - **Summaries are session-scoped.** Only rows in **Recently changed** can be
   summarized. A document that changes for the first time after launch has no
   earlier snapshot, so its first summary describes current content instead of

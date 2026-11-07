@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Descriptive window title**: the OS title now reads
+  `project — filename — docdeck` for documents under a project's `_ai` folder,
+  omits the project outside one, and is exactly `docdeck` when no document is
+  open. It updates on tab activation, open, close, close-all and rename. This
+  adds the single Tauri permission `core:window:allow-set-title`.
+- **One-line status bar and docked event log**: scan progress, the most recent
+  watch event and a warning count moved from the left sidebar to a full-width
+  bottom status line. Clicking it (or pressing `Ctrl+\``) opens a session-only,
+  500-entry event log with timestamps, severities, full warning text, an
+  All/Warnings filter, Clear, and follow/pause scrolling. The sidebar keeps only
+  documents and the actionable "no configuration" hint.
+- **Resizable panes**: the sidebar, outline, event-log height and Open/Browse
+  split are mouse- and keyboard-resizable, reset on double-click, and persist
+  through `docdeck.preferences.v1`. The window minimum width rises from 640 to
+  700 px so the document area keeps a 320 px floor. No dependency was added.
 - **Copy a file from the tab menu**: right-clicking a tab or a sidebar row now
   offers **Copy file** next to **Copy absolute path**. It writes a
   `file://` reference with the `text/uri-list` target, so the document can be

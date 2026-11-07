@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { Acknowledgements } from "./acknowledgements";
 import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
@@ -13,6 +14,18 @@ import { copyText } from "./copy-code";
 import { filterEntries } from "./filter-documents";
 import { FindController } from "./find-bar";
 import { parseFrontmatterRows, splitFrontmatter } from "./frontmatter";
+import { EventLog, type EventLogInput } from "./event-log";
+import { EventLogPanel, type LogFilter } from "./event-log-panel";
+import {
+  DEFAULT_LAYOUT,
+  SPLIT_MAX,
+  SPLIT_MIN,
+  eventLogBounds,
+  resolveLayout,
+  sidebarBounds,
+  tocBounds,
+} from "./layout-model";
+import { LayoutResizer } from "./layout-resizer";
 import {
   InboxModel,
   type InboxSeed,
@@ -47,7 +60,10 @@ import {
   type ThemeMode,
 } from "./preferences";
 import { fileName, isUnderAny } from "./project";
+import { composeWindowTitle } from "./window-title";
 import { scrollToAnchor } from "./scroll";
+import { StatusBar } from "./status-bar";
+import { deriveStatusBar } from "./status-view";
 import { adjacentTabPath, tabCycleDirection, type TabCycleDirection } from "./tab-cycle";
 import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
@@ -212,6 +228,14 @@ class AppState {
   private clearSnapshot: ClearSnapshot | null = null;
   private readonly sidebarEl = must<HTMLElement>("sidebar");
   private readonly sidebarPanel: SidebarPanel;
+  private readonly appRoot = must<HTMLElement>("app");
+  private readonly eventLog = new EventLog();
+  private readonly statusBar: StatusBar;
+  private readonly eventLogPanel: EventLogPanel;
+  private readonly sidebarResizer: LayoutResizer;
+  private readonly tocResizer: LayoutResizer;
+  private readonly logResizer: LayoutResizer;
+  private readonly splitResizer: LayoutResizer;
 
   constructor() {
     this.acks = new Acknowledgements();
@@ -315,11 +339,85 @@ class AppState {
         }
         this.persist();
         this.renderSidebar();
+        this.refreshResizers();
       },
       onContextMenu: (path, anchor, target) => {
         if (this.tabMenu.isOpen) return;
         this.tabMenu.open(path, anchor, target);
       },
+    });
+
+    this.statusBar = new StatusBar(must<HTMLElement>("status-bar"), {
+      onToggleLog: () => this.toggleLog(),
+      onShowWarnings: () => this.openLog("warnings"),
+    });
+    this.eventLogPanel = new EventLogPanel(must<HTMLElement>("event-log"), {
+      log: this.eventLog,
+      onClear: () => this.renderStatus(),
+      onVisibilityChange: () => this.refreshResizers(),
+    });
+
+    this.sidebarResizer = new LayoutResizer({
+      handle: must<HTMLElement>("sidebar-resizer"),
+      orientation: "vertical",
+      axis: "x",
+      getSize: () => this.preferences.layout.sidebarWidth,
+      setSize: (size) => {
+        this.preferences.layout.sidebarWidth = size;
+        this.applyLayout();
+      },
+      getBounds: () => sidebarBounds(window.innerWidth),
+      getDefault: () => DEFAULT_LAYOUT.sidebarWidth,
+      onPersist: () => this.persist(),
+      label: "Resize the document sidebar",
+    });
+
+    this.tocResizer = new LayoutResizer({
+      handle: must<HTMLElement>("toc-resizer"),
+      orientation: "vertical",
+      axis: "x",
+      getSize: () => this.preferences.layout.tocWidth,
+      setSize: (size) => {
+        this.preferences.layout.tocWidth = size;
+        this.applyLayout();
+      },
+      getBounds: () => tocBounds(window.innerWidth),
+      getDefault: () => DEFAULT_LAYOUT.tocWidth,
+      onPersist: () => this.persist(),
+      label: "Resize the document outline",
+    });
+
+    this.logResizer = new LayoutResizer({
+      handle: must<HTMLElement>("event-log-resizer"),
+      orientation: "horizontal",
+      axis: "y",
+      invert: true,
+      getSize: () => this.preferences.layout.eventLogHeight,
+      setSize: (size) => {
+        this.preferences.layout.eventLogHeight = size;
+        this.applyLayout();
+      },
+      getBounds: () => eventLogBounds(window.innerHeight),
+      getDefault: () => DEFAULT_LAYOUT.eventLogHeight,
+      onPersist: () => this.persist(),
+      label: "Resize the event log",
+    });
+
+    this.splitResizer = new LayoutResizer({
+      handle: this.sidebarPanel.splitHandle,
+      orientation: "horizontal",
+      axis: "y",
+      step: 2,
+      getSize: () => this.preferences.layout.sidebarSplit,
+      setSize: (size) => {
+        this.preferences.layout.sidebarSplit = size;
+        this.sidebarPanel.setSidebarSplit(size);
+      },
+      getBounds: () => ({ min: SPLIT_MIN, max: SPLIT_MAX }),
+      getDefault: () => DEFAULT_LAYOUT.sidebarSplit,
+      getScale: () => 100 / Math.max(1, this.sidebarEl.clientHeight),
+      onPersist: () => this.persist(),
+      label: "Resize the Open documents and Browse sections",
     });
 
     this.applyPreferencesToUi();
@@ -329,13 +427,98 @@ class AppState {
     this.bindShortcuts();
     this.theme.apply(this.preferences.themeMode);
     this.renderSidebar();
+    this.applyLayout();
+    this.updateWindowTitle();
+    this.renderStatus();
     void this.start();
+  }
+
+  /** Composes and applies the OS title before any Markdown work. */
+  private updateWindowTitle(): void {
+    const title = composeWindowTitle(this.activePath);
+    document.title = title;
+    void getCurrentWindow()
+      .setTitle(title)
+      .catch((error) => {
+        console.error("Failed to set the window title", error);
+      });
+  }
+
+  /** Applies the effective layout to CSS; never persists and never renders. */
+  private applyLayout(): void {
+    const effective = resolveLayout(this.preferences.layout, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+
+    this.appRoot.style.setProperty(
+      "--sidebar-width",
+      `${effective.sidebarWidth}px`,
+    );
+    this.appRoot.style.setProperty("--toc-width", `${effective.tocWidth}px`);
+    this.appRoot.style.setProperty(
+      "--event-log-height",
+      `${effective.eventLogHeight}px`,
+    );
+    this.sidebarPanel.setSidebarSplit(effective.openFraction * 100);
+
+    this.sidebarResizer.refresh();
+    this.tocResizer.refresh();
+    this.logResizer.refresh();
+    this.splitResizer.refresh();
+  }
+
+  /** Keeps boundaries inert while their pane is hidden or collapsed. */
+  private refreshResizers(): void {
+    this.tocResizer.setEnabled(this.preferences.tocVisible);
+    this.logResizer.setEnabled(this.eventLogPanel.isOpen);
+    this.splitResizer.setEnabled(
+      this.preferences.inboxVisible &&
+        !this.preferences.openSectionCollapsed &&
+        !this.preferences.browseSectionCollapsed,
+    );
+  }
+
+  private toggleLog(): void {
+    this.eventLogPanel.toggle(this.statusBar.element);
+  }
+
+  private openLog(filter: LogFilter): void {
+    this.eventLogPanel.open(this.statusBar.element, filter);
+  }
+
+  private renderStatus(): void {
+    this.statusBar.render(
+      deriveStatusBar({
+        scanning: this.scansInFlight > 0 || this.inboxStatus.loading,
+        progress: this.inboxStatus.progress,
+        entries: this.eventLog.entries(),
+        watchCount: this.watchRoots.size,
+      }),
+    );
+  }
+
+  private recordEvent(input: EventLogInput): void {
+    this.eventLog.record(input);
+    this.renderStatus();
+    this.eventLogPanel.sync();
+  }
+
+  private recordWarning(text: string): void {
+    const message = text.split(/\r?\n/)[0]?.trim() || "Watch warning";
+    this.recordEvent({
+      kind: "warning",
+      severity: "warning",
+      message,
+      detail: text.trim() === message ? undefined : text,
+    });
   }
 
   /** Applies the restored preferences before any control is clicked. */
   private applyPreferencesToUi(): void {
     this.tocPanelEl.hidden = !this.preferences.tocVisible;
     this.sidebarPanel.setBrowseVisible(this.preferences.inboxVisible);
+    this.refreshResizers();
   }
 
   private persist(): void {
@@ -398,6 +581,7 @@ class AppState {
         this.sidebarPanel.setBrowseVisible(next);
         if (next) this.sidebarPanel.refresh();
         this.persist();
+        this.refreshResizers();
       },
     });
 
@@ -412,6 +596,7 @@ class AppState {
         this.preferences.tocVisible = next;
         this.tocPanelEl.hidden = !next;
         this.persist();
+        this.refreshResizers();
       },
     });
 
@@ -446,6 +631,8 @@ class AppState {
         this.persist();
       },
     });
+
+    window.addEventListener("resize", () => this.applyLayout());
   }
 
   /**
@@ -504,8 +691,51 @@ class AppState {
     if (result.generation < this.reloadGeneration) return;
     this.reloadGeneration = result.generation;
 
+    const previousRoots = new Set(this.watchRoots);
     this.watchRoots.clear();
     for (const root of result.roots) this.watchRoots.add(root);
+
+    if (result.error !== null) {
+      this.recordEvent({
+        kind: "error",
+        severity: "error",
+        message: `Could not reload the watch configuration: ${result.error}`,
+      });
+    } else {
+      const hasWarnings = result.warnings.length > 0 || result.truncated;
+      this.recordEvent({
+        kind: "reload",
+        severity: hasWarnings ? "warning" : "info",
+        message: "Configuration reloaded",
+      });
+      for (const warning of result.warnings) this.recordWarning(warning);
+      if (result.truncated) {
+        this.recordEvent({
+          kind: "truncated",
+          severity: "warning",
+          message: "Some paths were skipped at the configured limits.",
+        });
+      }
+    }
+
+    for (const root of result.roots) {
+      if (!previousRoots.has(root)) {
+        this.recordEvent({
+          kind: "watch-added",
+          severity: "info",
+          message: `Watching ${root}`,
+        });
+      }
+    }
+    for (const root of previousRoots) {
+      if (!this.watchRoots.has(root)) {
+        this.recordEvent({
+          kind: "watch-removed",
+          severity: "info",
+          message: `Stopped watching ${root}`,
+        });
+      }
+    }
 
     this.inboxStatus = {
       ...this.inboxStatus,
@@ -569,6 +799,22 @@ class AppState {
       if (direction === null) return;
       event.preventDefault();
       this.cycleTab(direction);
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return;
+      if (event.key !== "`" || !(event.ctrlKey || event.metaKey)) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      this.toggleLog();
     });
   }
 
@@ -697,7 +943,7 @@ class AppState {
       await listen<ScanProgress>("scan-progress", (event) => {
         if (this.scansInFlight === 0) return;
         this.inboxStatus = { ...this.inboxStatus, progress: event.payload };
-        this.sidebarPanel.setProgress(event.payload);
+        this.renderStatus();
       });
     } catch (error) {
       console.error("Failed to attach backend listeners", error);
@@ -750,6 +996,7 @@ class AppState {
       this.renderSidebar();
 
       await this.setActiveTab(data.path);
+      this.updateWindowTitle();
       if (fragment !== null) scrollToAnchor(this.contentContainer, fragment);
       return true;
     } catch (error) {
@@ -834,7 +1081,10 @@ class AppState {
         this.reloadTokens.set(change.path, token);
       }
       this.closedTabs.forget(from);
-      if (this.activePath === from) this.activePath = change.path;
+      if (this.activePath === from) {
+        this.activePath = change.path;
+        this.updateWindowTitle();
+      }
       tabsChanged = true;
     }
 
@@ -1025,6 +1275,7 @@ class AppState {
 
   public async setActiveTab(path: string): Promise<void> {
     this.activePath = path;
+    this.updateWindowTitle();
     const tab = this.tabs.get(path);
     if (tab) tab.hasUnreadUpdate = false;
 
@@ -1063,6 +1314,7 @@ class AppState {
       const remaining = [...this.tabs.keys()];
       this.activePath = remaining[remaining.length - 1] ?? null;
     }
+    this.updateWindowTitle();
 
     this.renderSidebar();
     await this.renderActiveContent();
@@ -1093,6 +1345,7 @@ class AppState {
     }
     this.activeUpdatePath = null;
     this.activePath = null;
+    this.updateWindowTitle();
 
     this.renderSidebar();
     await this.renderActiveContent();
@@ -1124,6 +1377,11 @@ class AppState {
     this.scansInFlight += 1;
     this.inboxStatus = { ...this.inboxStatus, loading: true, progress: null };
     this.renderSidebar();
+    this.recordEvent({
+      kind: "scan-start",
+      severity: "info",
+      message: "Scanning watched paths…",
+    });
     try {
       const result = await invoke<WatchLoad>("load_watches");
       for (const root of result.roots) this.watchRoots.add(root);
@@ -1159,7 +1417,32 @@ class AppState {
         },
       };
 
-      if (result.error === null) {
+      if (result.error !== null) {
+        this.recordEvent({
+          kind: "error",
+          severity: "error",
+          message: `Could not load the watch configuration: ${result.error}`,
+        });
+      } else {
+        const documents = `${result.entries.length} document${
+          result.entries.length === 1 ? "" : "s"
+        }`;
+        const roots = `${result.roots.length} watch root${
+          result.roots.length === 1 ? "" : "s"
+        }`;
+        this.recordEvent({
+          kind: "scan-complete",
+          severity: "info",
+          message: `Scan complete — ${documents} in ${roots}`,
+        });
+        for (const warning of result.warnings) this.recordWarning(warning);
+        if (result.truncated) {
+          this.recordEvent({
+            kind: "truncated",
+            severity: "warning",
+            message: "Some paths were skipped at the configured limits.",
+          });
+        }
         this.afterSuccessfulInventory(true);
         // The active tab is on screen: never present it as missed work.
         const active = this.activePath ? this.tabs.get(this.activePath) : undefined;
@@ -1180,8 +1463,14 @@ class AppState {
         progress: null,
         lastReload: null,
       };
+      this.recordEvent({
+        kind: "error",
+        severity: "error",
+        message: `Could not load the watch configuration: ${String(error)}`,
+      });
     } finally {
       this.scansInFlight -= 1;
+      this.renderStatus();
     }
     this.renderSidebar();
     void this.refreshSummaryStatus();
@@ -1190,6 +1479,11 @@ class AppState {
   /** Registers session watches for CLI folder arguments. */
   private async addWatch(paths: string[]): Promise<void> {
     this.scansInFlight += 1;
+    this.recordEvent({
+      kind: "scan-start",
+      severity: "info",
+      message: "Scanning session folder(s)…",
+    });
     try {
       const result = await invoke<WatchAdded>("add_watch", { paths });
       for (const root of result.roots) this.watchRoots.add(root);
@@ -1197,15 +1491,37 @@ class AppState {
       if (this.inboxStatus.error === null) this.afterSuccessfulInventory(false);
       this.applyAcknowledgementFlags();
       this.inboxStatus.warnings = [...this.inboxStatus.warnings, ...result.warnings];
+
+      for (const root of result.roots) {
+        this.recordEvent({
+          kind: "watch-added",
+          severity: "info",
+          message: `Watching ${root}`,
+        });
+      }
+      this.recordEvent({
+        kind: "scan-complete",
+        severity: "info",
+        message: `Scan complete — ${result.entries.length} document${
+          result.entries.length === 1 ? "" : "s"
+        }`,
+      });
+      for (const warning of result.warnings) this.recordWarning(warning);
     } catch (error) {
       console.error("Failed to add watch", error);
       this.inboxStatus.warnings = [
         ...this.inboxStatus.warnings,
         `Could not watch folder: ${String(error)}`,
       ];
+      this.recordEvent({
+        kind: "error",
+        severity: "error",
+        message: `Could not watch folder: ${String(error)}`,
+      });
     } finally {
       this.scansInFlight -= 1;
       if (this.scansInFlight === 0) this.inboxStatus.progress = null;
+      this.renderStatus();
     }
     this.renderSidebar();
   }
@@ -1225,7 +1541,10 @@ class AppState {
       openPaths: new Set(this.tabs.keys()),
       activePath: this.activePath,
       activeUpdatePath: this.activeUpdatePath,
-      status: this.inboxStatus,
+      configHintPath:
+        this.inboxStatus.error === null && !this.inboxStatus.configFound
+          ? this.inboxStatus.configPath
+          : null,
       openCollapsed: this.preferences.openSectionCollapsed,
       browseCollapsed: this.preferences.browseSectionCollapsed,
       canUndo: this.clearSnapshot !== null,

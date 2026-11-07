@@ -32,7 +32,23 @@
       </header>
 
       <aside id="sidebar" aria-label="Documents"></aside>
+      <div
+        id="sidebar-resizer"
+        class="layout-resizer layout-resizer--vertical"
+        role="separator"
+        tabindex="0"
+        aria-orientation="vertical"
+        aria-label="Resize the document sidebar"
+      ></div>
       <nav id="toc-panel" hidden aria-label="Table of contents"></nav>
+      <div
+        id="toc-resizer"
+        class="layout-resizer layout-resizer--vertical"
+        role="separator"
+        tabindex="0"
+        aria-orientation="vertical"
+        aria-label="Resize the document outline"
+      ></div>
 
       <main id="content-container">
         <div id="empty-state" class="empty-placeholder">
@@ -44,6 +60,17 @@
         </div>
         <article id="markdown-viewer" class="markdown-body hidden"></article>
       </main>
+
+      <div
+        id="event-log-resizer"
+        class="layout-resizer layout-resizer--horizontal"
+        role="separator"
+        tabindex="0"
+        aria-orientation="horizontal"
+        aria-label="Resize the event log"
+      ></div>
+      <div id="event-log" class="event-log" hidden></div>
+      <footer id="status-bar" class="status-bar" aria-label="Status"></footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -24,6 +24,12 @@ describe("loadPreferences", () => {
       browseMode: "all",
       openSectionCollapsed: true,
       browseSectionCollapsed: true,
+      layout: {
+        sidebarWidth: 360,
+        tocWidth: 280,
+        eventLogHeight: 240,
+        sidebarSplit: 40,
+      },
     });
     expect(loadPreferences()).toEqual({
       themeMode: "light",
@@ -33,6 +39,12 @@ describe("loadPreferences", () => {
       browseMode: "all",
       openSectionCollapsed: true,
       browseSectionCollapsed: true,
+      layout: {
+        sidebarWidth: 360,
+        tocWidth: 280,
+        eventLogHeight: 240,
+        sidebarSplit: 40,
+      },
     });
   });
 
@@ -107,5 +119,128 @@ describe("loadPreferences", () => {
       JSON.stringify({ version: 1, browseMode: "entropy" }),
     );
     expect(loadPreferences().browseMode).toBe("recent");
+  });
+});
+
+describe("layout preferences", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("defaults the four pane sizes", () => {
+    expect(loadPreferences().layout).toEqual({
+      sidebarWidth: 300,
+      tocWidth: 240,
+      eventLogHeight: 200,
+      sidebarSplit: 50,
+    });
+  });
+
+  it("round-trips a layout payload", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        layout: {
+          sidebarWidth: 420,
+          tocWidth: 300,
+          eventLogHeight: 260,
+          sidebarSplit: 35,
+        },
+      }),
+    );
+
+    expect(loadPreferences().layout).toEqual({
+      sidebarWidth: 420,
+      tocWidth: 300,
+      eventLogHeight: 260,
+      sidebarSplit: 35,
+    });
+  });
+
+  it("defaults the layout for a legacy payload without it", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "light",
+        tocVisible: true,
+        frontmatterVisible: false,
+        inboxVisible: true,
+        browseMode: "all",
+      }),
+    );
+
+    const preferences = loadPreferences();
+    expect(preferences.layout).toEqual({
+      sidebarWidth: 300,
+      tocWidth: 240,
+      eventLogHeight: 200,
+      sidebarSplit: 50,
+    });
+    expect(preferences.themeMode).toBe("light");
+  });
+
+  it("falls back per field while other preferences survive", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "light",
+        layout: {
+          sidebarWidth: 350,
+          tocWidth: "wide",
+          eventLogHeight: NaN,
+          sidebarSplit: 120,
+        },
+      }),
+    );
+
+    const preferences = loadPreferences();
+    expect(preferences.themeMode).toBe("light");
+    expect(preferences.layout).toEqual({
+      sidebarWidth: 350,
+      tocWidth: 240,
+      eventLogHeight: 200,
+      sidebarSplit: 50,
+    });
+  });
+
+  it("rejects non-finite and out-of-range values", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        layout: {
+          sidebarWidth: Infinity,
+          tocWidth: 10,
+          eventLogHeight: 20_000,
+          sidebarSplit: 0,
+        },
+      }),
+    );
+
+    expect(loadPreferences().layout).toEqual({
+      sidebarWidth: 300,
+      tocWidth: 240,
+      eventLogHeight: 200,
+      sidebarSplit: 50,
+    });
+  });
+
+  it("returns a mutable layout copy on a fresh profile", () => {
+    const preferences = loadPreferences();
+    expect(() => {
+      preferences.layout.sidebarWidth = 360;
+    }).not.toThrow();
+    expect(preferences.layout.sidebarWidth).toBe(360);
+  });
+
+  it("keeps the storage key and version", () => {
+    savePreferences({
+      ...DEFAULT_PREFERENCES,
+    });
+
+    const stored = window.localStorage.getItem(KEY);
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored as string).version).toBe(1);
   });
 });
