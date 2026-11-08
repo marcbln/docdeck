@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { extractHeadings } from "./toc";
-import { marked, renderMarkdown } from "./markdown";
+import { isTailing, marked, renderMarkdown } from "./markdown";
 
 /** Installs a clipboard spy and returns the array it writes into. */
 function stubClipboard(): string[] {
@@ -112,11 +112,14 @@ describe("renderMarkdown", () => {
     expect(target.querySelectorAll("button.code-copy")).toHaveLength(1);
   });
 
-  /** A pane tall enough to scroll, with a fixed viewport for tail detection. */
-  function scrollPane(): { scroller: HTMLElement; article: HTMLElement } {
+  /** A pane with a fixed viewport for tail detection. */
+  function scrollPane(
+    scrollHeight = 1_000,
+    clientHeight = 400,
+  ): { scroller: HTMLElement; article: HTMLElement } {
     const scroller = document.createElement("main");
-    Object.defineProperty(scroller, "scrollHeight", { value: 1_000, configurable: true });
-    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scroller, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: clientHeight, configurable: true });
     const article = document.createElement("article");
     scroller.appendChild(article);
     document.body.appendChild(scroller);
@@ -150,5 +153,40 @@ describe("renderMarkdown", () => {
     await renderMarkdown("first line\nappended line", article, [], "preserve");
 
     expect(scroller.scrollTop).toBe(200);
+  });
+
+  it("does not pin a document that fits the viewport to the new end", async () => {
+    const { scroller, article } = scrollPane(400, 400);
+    await renderMarkdown("first line", article, [], "top");
+
+    await renderMarkdown(
+      Array.from({ length: 50 }, (_, index) => `line ${index}`).join("\n"),
+      article,
+      [],
+      "preserve",
+    );
+
+    expect(scroller.scrollTop).toBe(0);
+  });
+});
+
+describe("isTailing", () => {
+  function pane(scrollHeight: number, clientHeight: number, scrollTop: number): HTMLElement {
+    const scroller = document.createElement("div");
+    Object.defineProperty(scroller, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: clientHeight, configurable: true });
+    scroller.scrollTop = scrollTop;
+    return scroller;
+  }
+
+  it("rejects a pane whose content fits the viewport", () => {
+    expect(isTailing(pane(400, 400, 0))).toBe(false);
+    expect(isTailing(pane(420, 400, 20))).toBe(false);
+  });
+
+  it("detects a scrollable pane parked at its end", () => {
+    expect(isTailing(pane(1_000, 400, 600))).toBe(true);
+    expect(isTailing(pane(1_000, 400, 590))).toBe(true);
+    expect(isTailing(pane(1_000, 400, 500))).toBe(false);
   });
 });

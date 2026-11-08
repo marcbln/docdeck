@@ -87,15 +87,19 @@ export type RenderScroll = "preserve" | "top";
 /**
  * Whether a scroll pane is parked at (or within a hair of) its end.
  *
+ * A pane whose content does not overflow is *not* tailing: there is no reading
+ * position to follow, so a reader at the top of a short document must stay
+ * there when an agent appends enough lines to make it scrollable. Only a pane
+ * with real scroll room, parked at its bottom, opts into tail-pinning.
+ *
  * Exported so the caller can re-pin the pane after it grows the content
  * further — the metadata table is mounted *after* rendering, so its height is
  * not part of `renderMarkdown`'s own tail calculation.
  */
 export function isTailing(scroller: HTMLElement): boolean {
-  return (
-    scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <=
-    TAIL_THRESHOLD_PX
-  );
+  const scrollable = scroller.scrollHeight - scroller.clientHeight;
+  if (scrollable <= TAIL_THRESHOLD_PX) return false;
+  return scrollable - scroller.scrollTop <= TAIL_THRESHOLD_PX;
 }
 
 /**
