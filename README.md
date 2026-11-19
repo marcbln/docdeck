@@ -25,9 +25,22 @@ docdeck plans/refactor_plan.md reports/agent_status.md
 - **Cross-session unread** — review state is recorded per document, so documents
   changed while docdeck was closed are marked unread after a restart, while
   reviewed and unchanged documents stay read.
+- **Bookmarks** — mark whole documents and individual outline headings with a
+  star, `Ctrl`/`Cmd`+`D`, or the row context menu. A third **Bookmarks** browse
+  mode lists them beside All documents and Recently changed, nests headings under
+  their document, and keeps the shared filter. Section bookmarks store heading
+  text plus a small context window, so they follow edits and reorderings; a
+  heading that vanished is shown as **Not found** and can be re-anchored from
+  the document's current outline instead of silently jumping elsewhere.
+  Bookmarked documents reuse the same cross-session unread rule.
+- **Bookmark-only notifications** — an opt-in checkbox in the **Bookmarks**
+  toolbar limits desktop popups to bookmarked documents (including documents
+  bookmarked only by heading) while the tray dot still reflects every change.
 - **Browse filter** — a search field above the browse list narrows All documents
   or Recently changed by filename, folder or `_ai` project, case-insensitively,
-  without changing order or any open/unread/deleted state.
+  without changing order or any open/unread/deleted state. In **Bookmarks**, the
+  same field matches documents and heading text; a heading-only match keeps its
+  document visible as a container.
 - **Rename and move tracking** — a rename or move inside watched locations
   updates one row in place, keeping the document open, active and read. A move
   out of every watch leaves the list and marks an open tab unavailable; a move
@@ -336,8 +349,13 @@ is the triage surface.
 | `⚡ Auto-Sort` | Order Open documents by most recently modified |
 | `👁 Watches` | Open the in-app watch configuration surface |
 | `✉ Browse` | Show or hide the lower browse section |
-| `All` / `Recently changed` | Switch the browse list's mode |
+| `All` / `Recently changed` / `Bookmarks` | Switch the browse list's mode |
 | Filter field | Narrow the selected list; `Esc` or `×` clears it |
+| `☆` on a document row | Bookmark or unbookmark it without opening it |
+| `☆` on an outline heading | Bookmark or unbookmark that section |
+| `★ Bookmark` in the header | Bookmark or unbookmark the active document |
+| `Ctrl+D` / `Cmd+D` | Toggle the active document's bookmark |
+| `Re-anchor` on a stale section | Pick a heading from the current outline |
 | Middle-click a browse row | Dismiss it from the list on screen |
 | `Clear` / `Undo` | Clear recent activity and acknowledge it / restore it |
 | `✨` | Summarize the current Recently changed rows with the configured agent |
@@ -394,14 +412,20 @@ like the rest of the config:
   (default 10); bursts of agent writes raise one notification, not twenty.
 - `enabled = false` — no tray icon at all.
 
+The opt-in **Notify only for bookmarked documents** checkbox in the Bookmarks
+toolbar narrows popups to the current bookmark path set; the dot still turns
+amber for every change. Enabling it with no bookmarks means no popups until a
+bookmark exists, and the note beside the checkbox says so.
+
 On XFCE the dot shows in the standard System Tray plugin (4.18+ supports
 StatusNotifierItem natively). If no tray host is reachable, docdeck logs the
 reason to stderr and runs as a plain window — the tray is never fatal.
 
 ### Preferences
 
-Theme, outline, frontmatter, browse visibility, browse mode, the collapsed
-state of each sidebar section and the four pane sizes (`layout.sidebarWidth`,
+Theme, outline, frontmatter, browse visibility, browse mode (including
+**Bookmarks**), the collapsed state of each sidebar section, the bookmark-only
+notification setting and the four pane sizes (`layout.sidebarWidth`,
 `layout.tocWidth`, `layout.eventLogHeight`, `layout.sidebarSplit`) are stored
 under the `docdeck.preferences.v1` key in `localStorage`, so docdeck reopens the
 way you left it. Each layout field is validated independently; a missing or
@@ -411,10 +435,13 @@ preference. Event-log visibility, its filter and follow state are session-only
 and never persisted. Per-document review
 acknowledgements use `docdeck.acknowledgements.v1` (`{ version: 1, entries: {
 "<path>": { mtime, at } } }`); corrupt or wrong-version history is treated as a
-first launch and one bad entry never discards the rest. The browse filter,
-Recently changed activity and all session state are not persisted. Clear the
-preferences key to reset the appearance defaults (dark theme, outline hidden,
-frontmatter shown, browse shown in Recently changed mode, both sections
+first launch and one bad entry never discards the rest. Bookmarks use
+`docdeck.bookmarks.v1` (`{ version: 1, documents, sections }`) with per-entry
+validation: a corrupt key starts empty, a bad entry is dropped while valid
+siblings survive, and section resolution status is never persisted. The browse
+filter, Recently changed activity and all session state are not persisted. Clear
+the preferences key to reset the appearance defaults (dark theme, outline
+hidden, frontmatter shown, browse shown in Recently changed mode, both sections
 expanded).
 
 ## Development

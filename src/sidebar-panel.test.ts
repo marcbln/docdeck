@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxEntry } from "./inbox-model";
 import type { OpenRow } from "./sidebar-model";
 import { SidebarPanel, type SidebarViewState } from "./sidebar-panel";
+import { addDocument, emptyCollection } from "./bookmarks-model";
+import { buildBookmarkView } from "./bookmarks-view";
+import type { SectionAnchor } from "./bookmarks-model";
+import { addSection } from "./bookmarks-model";
 
 const NOW = 1_800_000_000_000;
 const VIEWPORT = 480;
@@ -59,6 +63,15 @@ function state(overrides: Partial<SidebarViewState> = {}): SidebarViewState {
       configPath: "/home/u/.config/docdeck/config.toml",
     },
     summaryBusy: false,
+    bookmarks: {
+      rows: [],
+      documents: [],
+      documentCount: 0,
+      sectionCount: 0,
+      totalCount: 0,
+    },
+    bookmarkedPaths: new Set(),
+    bookmarkNotificationsOnly: false,
     now: NOW,
     ...overrides,
   };
@@ -77,6 +90,11 @@ function mount(next: SidebarViewState = state()): {
   onModeChange: ReturnType<typeof vi.fn>;
   onFilterChange: ReturnType<typeof vi.fn>;
   onToggleSection: ReturnType<typeof vi.fn>;
+  onToggleDocumentBookmark: ReturnType<typeof vi.fn>;
+  onSectionActivate: ReturnType<typeof vi.fn>;
+  onSectionRemove: ReturnType<typeof vi.fn>;
+  onSectionReanchor: ReturnType<typeof vi.fn>;
+  onBookmarkNotificationsChange: ReturnType<typeof vi.fn>;
 } {
   document.body.innerHTML = '<aside id="sidebar"></aside>';
   const root = document.getElementById("sidebar") as HTMLElement;
@@ -90,6 +108,11 @@ function mount(next: SidebarViewState = state()): {
   const onModeChange = vi.fn();
   const onFilterChange = vi.fn();
   const onToggleSection = vi.fn();
+  const onToggleDocumentBookmark = vi.fn();
+  const onSectionActivate = vi.fn();
+  const onSectionRemove = vi.fn();
+  const onSectionReanchor = vi.fn();
+  const onBookmarkNotificationsChange = vi.fn();
   const panel = new SidebarPanel(root, {
     onOpen,
     onClose,
@@ -100,6 +123,11 @@ function mount(next: SidebarViewState = state()): {
     onSummarize,
     onModeChange,
     onFilterChange,
+    onToggleDocumentBookmark,
+    onSectionActivate,
+    onSectionRemove,
+    onSectionReanchor,
+    onBookmarkNotificationsChange,
     onToggleSection,
     onContextMenu: vi.fn(),
     now: () => NOW,
@@ -120,6 +148,11 @@ function mount(next: SidebarViewState = state()): {
     onModeChange,
     onFilterChange,
     onToggleSection,
+    onToggleDocumentBookmark,
+    onSectionActivate,
+    onSectionRemove,
+    onSectionReanchor,
+    onBookmarkNotificationsChange,
   };
 }
 
@@ -156,9 +189,11 @@ describe("SidebarPanel", () => {
     expect(row.classList.contains("active")).toBe(true);
     expect(row.classList.contains("unread")).toBe(true);
     expect(row.classList.contains("deleted")).toBe(true);
-    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(row.querySelector(".sidebar-row-main")?.getAttribute("aria-current")).toBe("true");
     expect(row.querySelector(".tab-dot")).not.toBeNull();
     expect(row.querySelector(".sidebar-row-close")).not.toBeNull();
+    expect(row.querySelector(".sidebar-row-main")).not.toBeNull();
+    expect(row.querySelector(".sidebar-row-bookmark")).not.toBeNull();
   });
 
   it("shows an empty state when no document is open", () => {
@@ -193,6 +228,22 @@ describe("SidebarPanel", () => {
     );
 
     expect(onClose).toHaveBeenCalledWith("/a/plan.md");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("toggles a browse row's bookmark without opening it", () => {
+    const { root, onToggleDocumentBookmark, onOpen } = mount(
+      state({
+        browseMode: "all",
+        inventory: [entry("/a/one.md", NOW)],
+      }),
+    );
+    const star = root.querySelector<HTMLButtonElement>(".inbox-bookmark")!;
+    expect(star.getAttribute("aria-pressed")).toBe("false");
+
+    star.click();
+
+    expect(onToggleDocumentBookmark).toHaveBeenCalledWith("/a/one.md");
     expect(onOpen).not.toHaveBeenCalled();
   });
 
@@ -254,11 +305,9 @@ describe("SidebarPanel", () => {
     const { root, onOpen } = mount(
       state({ openRows: [openRow("/a/plan.md")] }),
     );
-    const row = root.querySelector<HTMLElement>(".sidebar-row")!;
+    const main = root.querySelector<HTMLButtonElement>(".sidebar-row-main")!;
 
-    row.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    main.click();
 
     expect(onOpen).toHaveBeenCalledWith("/a/plan.md");
   });
@@ -516,5 +565,358 @@ describe("SidebarPanel", () => {
     const { root } = mount(state({ filterTerm: "alpha" }));
     const input = root.querySelector<HTMLInputElement>("#sidebar-filter-input");
     expect(input?.value).toBe("alpha");
+  });
+
+  it("reports the bookmark mode and marker count", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/a/plan.md", 1);
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry("/a/plan.md", NOW)],
+    });
+    const { root, onModeChange } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarks,
+        bookmarkedPaths: new Set(["/a/plan.md"]),
+      }),
+    );
+
+    const mode = root.querySelector<HTMLButtonElement>(
+      ".sidebar-mode[data-mode='bookmarks']",
+    )!;
+    expect(mode.getAttribute("aria-pressed")).toBe("true");
+    expect(mode.getAttribute("aria-label")).toBe("Bookmarks, 1 bookmark");
+    expect(mode.querySelector(".sidebar-mode-count")?.textContent).toBe("1");
+
+    const all = root.querySelector<HTMLButtonElement>(
+      ".sidebar-mode[data-mode='all']",
+    )!;
+    all.click();
+    expect(onModeChange).toHaveBeenCalledWith("all");
+  });
+
+  it("renders bookmark document rows and toggles their star without opening", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/home/u/devel/docdeck/_ai/plan.md", 1);
+    const path = "/home/u/devel/docdeck/_ai/plan.md";
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry(path, NOW)],
+    });
+    const { root, onOpen, onToggleDocumentBookmark } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarks,
+        bookmarkedPaths: new Set([path]),
+        activePath: null,
+      }),
+    );
+
+    const row = root.querySelector<HTMLElement>(".inbox-row")!;
+    expect(row.classList.contains("bookmark-document")).toBe(true);
+    const star = row.querySelector<HTMLButtonElement>(".inbox-bookmark")!;
+    expect(star.getAttribute("aria-pressed")).toBe("true");
+
+    star.click();
+    expect(onToggleDocumentBookmark).toHaveBeenCalledWith(path);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    (row.querySelector(".inbox-row-main") as HTMLButtonElement).click();
+    expect(onOpen).toHaveBeenCalledWith(path);
+  });
+
+  it("shows the empty bookmarks state with a recovery action", () => {
+    const { root, onModeChange } = mount(
+      state({ browseMode: "bookmarks", bookmarks: buildBookmarkView({
+        collection: emptyCollection(),
+        inventory: [],
+      }) }),
+    );
+
+    const empty = root.querySelector(".sidebar-bookmarks-empty");
+    expect(empty?.textContent).toContain("No bookmarks yet");
+    expect(empty?.textContent).toContain("Ctrl/Cmd+D");
+    (empty?.querySelector(".sidebar-inline-action") as HTMLButtonElement).click();
+    expect(onModeChange).toHaveBeenCalledWith("all");
+  });
+
+  it("shows the filtered-empty bookmarks state with Clear filter", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/a/plan.md", 1);
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry("/a/plan.md", NOW)],
+      filterTerm: "nothing",
+    });
+    const { root, onFilterChange } = mount(
+      state({
+        browseMode: "bookmarks",
+        filterTerm: "nothing",
+        bookmarks,
+        bookmarkedPaths: new Set(["/a/plan.md"]),
+      }),
+    );
+
+    const empty = root.querySelector(".sidebar-bookmarks-empty");
+    expect(empty?.textContent).toContain("No bookmarks match “nothing”");
+    (empty?.querySelector(".sidebar-inline-action") as HTMLButtonElement).click();
+    expect(onFilterChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("hides Recent-only actions and the popout in bookmarks mode", () => {
+    const { root } = mount(state({ browseMode: "bookmarks" }));
+
+    for (const action of ["clear", "undo", "summary", "popout"]) {
+      expect(
+        root.querySelector<HTMLButtonElement>(
+          `.sidebar-action[data-action='${action}']`,
+        )?.hidden,
+      ).toBe(true);
+    }
+  });
+
+  it("shows the bookmark notification setting and its effect note", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/a/plan.md", 1);
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry("/a/plan.md", NOW)],
+    });
+    const { root, onBookmarkNotificationsChange } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarks,
+        bookmarkedPaths: new Set(["/a/plan.md"]),
+        bookmarkNotificationsOnly: true,
+      }),
+    );
+
+    const settings = root.querySelector<HTMLElement>(
+      ".sidebar-bookmarks-settings",
+    )!;
+    expect(settings.hidden).toBe(false);
+    const checkbox = settings.querySelector<HTMLInputElement>(
+      ".sidebar-bookmark-notifications",
+    )!;
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.getAttribute("aria-describedby")).toBe(
+      "bookmark-notifications-note",
+    );
+    expect(settings.textContent).toContain("Notify only for bookmarked documents");
+    expect(settings.textContent).toContain("tray dot");
+
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event("change"));
+    expect(onBookmarkNotificationsChange).toHaveBeenCalledWith(false);
+  });
+
+  it("explains bookmark-only notifications when no bookmarks exist", () => {
+    const { root } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarkNotificationsOnly: true,
+        bookmarks: buildBookmarkView({
+          collection: emptyCollection(),
+          inventory: [],
+        }),
+      }),
+    );
+
+    expect(
+      root.querySelector(".sidebar-bookmark-setting-note")?.textContent,
+    ).toContain("No bookmarks yet");
+  });
+
+  it("renders section rows with statuses, indentation and actions", () => {
+    const anchor: SectionAnchor = {
+      text: "Risks",
+      depth: 3,
+      before: ["Scope"],
+      after: ["Questions"],
+      ordinal: 0,
+      order: 1,
+    };
+    const collection = emptyCollection();
+    addDocument(collection, "/a/plan.md", 1);
+    addSection(collection, "/a/plan.md", anchor, 1, "s1");
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry("/a/plan.md", NOW)],
+      resolutions: new Map([
+        ["s1", { kind: "stale" as const, reason: "missing" as const }],
+      ]),
+    });
+    const { root, onSectionActivate, onSectionRemove, onSectionReanchor, onOpen } =
+      mount(
+        state({
+          browseMode: "bookmarks",
+          bookmarks,
+          bookmarkedPaths: new Set(["/a/plan.md"]),
+        }),
+      );
+
+    const row = root.querySelector<HTMLElement>(".bookmark-section-row")!;
+    expect(row.style.getPropertyValue("--bookmark-depth")).toBe("3");
+    expect(row.querySelector(".bookmark-section-status")?.textContent).toBe(
+      "Not found",
+    );
+
+    const open = row.querySelector<HTMLButtonElement>(".bookmark-section-open")!;
+    open.click();
+    expect(onSectionActivate).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    row.querySelector<HTMLButtonElement>(
+      "[data-bookmark-action='reanchor']",
+    )!.click();
+    expect(onSectionReanchor).toHaveBeenCalledWith("s1");
+    expect(onSectionActivate).toHaveBeenCalledTimes(1);
+
+    row.querySelector<HTMLButtonElement>(
+      "[data-bookmark-action='remove']",
+    )!.click();
+    expect(onSectionRemove).toHaveBeenCalledWith("s1");
+  });
+
+  it("uses text badges for unverified, moved, shared and unavailable sections", () => {
+    const anchor: SectionAnchor = {
+      text: "Risks",
+      depth: 2,
+      before: [],
+      after: [],
+      ordinal: 0,
+      order: 1,
+    };
+
+    function statusFor(
+      resolutions: Parameters<typeof buildBookmarkView>[0]["resolutions"],
+      inventory: InboxEntry[],
+    ): string {
+      const collection = emptyCollection();
+      addSection(collection, "/a/plan.md", anchor, 1, "s1");
+      const bookmarks = buildBookmarkView({
+        collection,
+        inventory,
+        resolutions,
+      });
+      const { root } = mount(
+        state({ browseMode: "bookmarks", bookmarks }),
+      );
+      return (
+        root.querySelector(".bookmark-section-status")?.textContent ?? ""
+      );
+    }
+
+    expect(statusFor(undefined, [entry("/a/plan.md", NOW)])).toBe("Not checked");
+    expect(
+      statusFor(
+        new Map([
+          [
+            "s1",
+            {
+              kind: "resolved",
+              index: 1,
+              slug: "risks",
+              text: "Risks",
+              depth: 2,
+              via: "context",
+            },
+          ],
+        ]),
+        [entry("/a/plan.md", NOW)],
+      ),
+    ).toBe("Moved");
+
+    const sharedCollection = emptyCollection();
+    addSection(sharedCollection, "/a/plan.md", anchor, 1, "s1");
+    addSection(
+      sharedCollection,
+      "/a/plan.md",
+      { ...anchor, text: "Other" },
+      1,
+      "s2",
+    );
+    const shared = buildBookmarkView({
+      collection: sharedCollection,
+      inventory: [entry("/a/plan.md", NOW)],
+      resolutions: new Map([
+        [
+          "s1",
+          {
+            kind: "resolved",
+            index: 1,
+            slug: "risks",
+            text: "Risks",
+            depth: 2,
+            via: "text" as const,
+          },
+        ],
+        [
+          "s2",
+          {
+            kind: "resolved",
+            index: 1,
+            slug: "risks",
+            text: "Risks",
+            depth: 2,
+            via: "text" as const,
+          },
+        ],
+      ]),
+    });
+    const { root: sharedRoot } = mount(
+      state({ browseMode: "bookmarks", bookmarks: shared }),
+    );
+    expect(
+      sharedRoot.querySelector(".bookmark-section-status")?.textContent,
+    ).toBe("Shared");
+
+    expect(statusFor(undefined, [])).toBe("Unavailable");
+  });
+  it("shows the same unread marker on bookmark document rows", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/a/plan.md", 1);
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [entry("/a/plan.md", NOW, { unread: true })],
+    });
+    const { root } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarks,
+        bookmarkedPaths: new Set(["/a/plan.md"]),
+      }),
+    );
+
+    const row = root.querySelector<HTMLElement>(".inbox-row")!;
+    expect(row.classList.contains("unread")).toBe(true);
+    expect(row.querySelector(".inbox-dot")).not.toBeNull();
+    expect(row.querySelector(".inbox-filename")?.textContent).toBe("plan.md");
+  });
+
+  it("suppresses the unread marker for an unavailable bookmark", () => {
+    const collection = emptyCollection();
+    addDocument(collection, "/gone.md", 1);
+    const bookmarks = buildBookmarkView({
+      collection,
+      inventory: [
+        entry("/gone.md", NOW, { unread: true, deleted: true }),
+      ],
+    });
+    const { root } = mount(
+      state({
+        browseMode: "bookmarks",
+        bookmarks,
+        bookmarkedPaths: new Set(["/gone.md"]),
+      }),
+    );
+
+    const row = root.querySelector<HTMLElement>(".inbox-row")!;
+    expect(row.classList.contains("unread")).toBe(false);
+    expect(row.classList.contains("unavailable")).toBe(true);
+    expect(row.querySelector(".bookmark-unavailable-badge")?.textContent).toBe(
+      "Unavailable",
+    );
   });
 });

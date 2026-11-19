@@ -14,6 +14,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::bookmark_filter::BookmarkFilterState;
 use crate::config::{NotifyMode, TrayConfig};
 use crate::watcher::PathChange;
 
@@ -222,11 +223,21 @@ impl TrayManager {
         if changes.is_empty() {
             return;
         }
+        // The presence dot reflects every change, even when popups are narrow.
         self.set_presence(if focused {
             Presence::Current
         } else {
             Presence::Unread
         });
+
+        let candidates = app
+            .try_state::<BookmarkFilterState>()
+            .map(|filter| filter.candidates(changes))
+            .unwrap_or_else(|| changes.to_vec());
+        // An empty candidate set must not consume the throttle window.
+        if candidates.is_empty() {
+            return;
+        }
 
         let now = Instant::now();
         let may = self.runtime.lock().is_ok_and(|runtime| {
@@ -242,11 +253,11 @@ impl TrayManager {
             return;
         }
 
-        let body = notification_body(changes, MAX_NOTIFY_FILES);
-        let title = if changes.len() == 1 {
+        let body = notification_body(&candidates, MAX_NOTIFY_FILES);
+        let title = if candidates.len() == 1 {
             "docdeck: 1 change".to_string()
         } else {
-            format!("docdeck: {} changes", changes.len())
+            format!("docdeck: {} changes", candidates.len())
         };
         if app
             .notification()

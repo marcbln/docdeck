@@ -24,6 +24,7 @@ describe("loadPreferences", () => {
       browseMode: "all",
       openSectionCollapsed: true,
       browseSectionCollapsed: true,
+      bookmarkNotificationsOnly: true,
       layout: {
         sidebarWidth: 360,
         tocWidth: 280,
@@ -39,6 +40,7 @@ describe("loadPreferences", () => {
       browseMode: "all",
       openSectionCollapsed: true,
       browseSectionCollapsed: true,
+      bookmarkNotificationsOnly: true,
       layout: {
         sidebarWidth: 360,
         tocWidth: 280,
@@ -119,6 +121,32 @@ describe("loadPreferences", () => {
       JSON.stringify({ version: 1, browseMode: "entropy" }),
     );
     expect(loadPreferences().browseMode).toBe("recent");
+  });
+
+  it("accepts the bookmarks browse mode", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ version: 1, browseMode: "bookmarks" }),
+    );
+    expect(loadPreferences().browseMode).toBe("bookmarks");
+  });
+
+  it("defaults bookmark-only notifications to off", () => {
+    expect(loadPreferences().bookmarkNotificationsOnly).toBe(false);
+  });
+
+  it("validates the bookmark notification preference independently", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "light",
+        bookmarkNotificationsOnly: "yes",
+      }),
+    );
+    const preferences = loadPreferences();
+    expect(preferences.themeMode).toBe("light");
+    expect(preferences.bookmarkNotificationsOnly).toBe(false);
   });
 });
 

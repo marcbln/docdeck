@@ -67,10 +67,8 @@ if textCandidates.length > 1:
 # No exact text: context fallback (the heading text was edited).
 contextCandidates = indices i where
     headings[i].depth == anchor.depth
-    and (
-        sideScore(anchor.before, headings[i].before) > 0
-        or sideScore(anchor.after,  headings[i].after)  > 0
-    )
+    and sideScore(anchor.before, headings[i].before) > 0
+    and sideScore(anchor.after,  headings[i].after)  > 0
 
 if contextCandidates is empty: return stale(reason = "missing")
 
@@ -84,7 +82,9 @@ return stale(reason = "ambiguous")
 **Rules that must not change without a new decision record**
 - Exact text is always tried first.
 - Context uses a two-heading window plus depth; a context-only match requires the
-  same depth and at least one matching window position or an empty matching side.
+  same depth and consistent evidence on **both** sides (an empty matching side
+  counts as evidence). Requiring both sides keeps a deleted heading from handing
+  its context to an unrelated neighbour.
 - Occurrence is used only when duplicate exact-text candidates have no context
   evidence at all (`best == 0`). Positive but tied evidence is stale rather than
   a guess. Occurrence is **not** used in the context fallback.

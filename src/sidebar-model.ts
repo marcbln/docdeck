@@ -7,7 +7,7 @@
 
 import type { InboxEntry } from "./inbox-model";
 
-export type BrowseMode = "all" | "recent";
+export type BrowseMode = "all" | "recent" | "bookmarks";
 
 /** The subset of a tab the Open Documents list needs. */
 export interface TabLike {

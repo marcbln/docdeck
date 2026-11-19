@@ -1,6 +1,18 @@
 # docdeck Constitution
 
 <!--
+Sync Impact Report (2026-11-19, feature 005-document-bookmarks)
+- Version: 1.2.0 -> 1.3.0 (MINOR: adds one persisted store; no principle
+  removed or redefined)
+- Modified sections: Technical Constraints -> Persistence (adds the versioned
+  document/section bookmark collection and the two new preference fields)
+- Added/removed principles: none
+- Templates: no `.specify/templates` change required
+- Follow-up TODOs: none; feature 006's separate `shortcuts.toml` is deliberately
+  not pre-declared here and will amend Persistence when implemented
+-->
+
+<!--
 Sync Impact Report (2026-11-03, feature 003-installer-upgrade-restart)
 - Version: 1.1.0 -> 1.2.0 (MINOR: materially expanded persistence guidance;
   no principle removed or redefined)
@@ -128,14 +140,21 @@ to maintain.
 - **Dependencies**: Add runtime dependencies deliberately and keep the tree
   small. A new dependency requires justification in the change.
 - **Persistence**: UI preferences use the versioned `docdeck.preferences.v1`
-  `localStorage` key with per-field validation. Per-document review
-  acknowledgements use the versioned `docdeck.acknowledgements.v1` key with
-  per-entry validation and corruption recovery; they decide unread state across
-  restarts. Document content, open documents, `Recently Changed` activity and
-  the browse filter are never persisted. The watch configuration is a TOML file
-  read at startup and live-reloaded after valid edits; the in-app surface may
-  write that file atomically. The app also writes one ephemeral per-user runtime
-  instance record, `$XDG_RUNTIME_DIR/docdeck/instance.json` (falling back to
+  `localStorage` key with per-field validation; the bookmark feature adds
+  `browseMode: "bookmarks"` and `bookmarkNotificationsOnly: boolean` to that
+  payload, each validated independently. Per-document review acknowledgements
+  use the versioned `docdeck.acknowledgements.v1` key with per-entry validation
+  and corruption recovery; they decide unread state across restarts. Bookmarks
+  use the versioned `docdeck.bookmarks.v1` `localStorage` key with per-entry
+  validation: it stores only document markers and section anchors (paths,
+  heading text, depth, neighbours, occurrence/order and timestamps), invalid
+  entries are discarded individually, and section resolution status is session
+  state that is never persisted there. Document content, open documents,
+  `Recently Changed` activity and the browse filter are never persisted. The
+  watch configuration is a TOML file read at startup and live-reloaded after
+  valid edits; the in-app surface may write that file atomically. The app also
+  writes one ephemeral per-user runtime instance record,
+  `$XDG_RUNTIME_DIR/docdeck/instance.json` (falling back to
   `$HOME/.local/state/docdeck/instance.json`, or
   `%LOCALAPPDATA%\docdeck\instance.json` on Windows), with a `0700` directory,
   a `0600` file, atomic replace, a 64 KiB bound, and metadata only (pid,
@@ -184,4 +203,4 @@ states the non-negotiable principles those conventions implement.
   coding guidance; they MUST remain consistent with this document. If they
   disagree, this document wins and the guidance is corrected.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-11-03
+**Version**: 1.3.0 | **Ratified**: 2026-10-31 | **Last Amended**: 2026-11-19

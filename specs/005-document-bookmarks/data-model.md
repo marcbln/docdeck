@@ -123,9 +123,10 @@ activated. Never persisted.
    empty candidate side +2; depth +1). A unique best wins; occurrence is used
    only when every candidate scores zero and the stored `ordinal` candidate
    exists.
-3. No text match: same-depth headings matching at least one window position or
-   an empty matching side; a unique best wins as a re-anchor
-   (`via: "context"`). Ties/misses are stale.
+3. No text match: same-depth headings with consistent evidence on both sides of
+   the window (an empty matching side counts); a unique best wins as a re-anchor
+   (`via: "context"`). Ties/misses are stale. Both sides are required so a
+   deleted heading cannot hand its context to a neighbour.
 4. A stale bookmark never yields a slug.
 
 ## Entity: BookmarkDocumentView (derived)

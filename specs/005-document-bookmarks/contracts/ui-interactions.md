@@ -116,7 +116,7 @@ The existing single browse filter applies in Bookmarks mode (FR-013):
 
 | Key | Context | Result |
 |-----|---------|--------|
-| `Ctrl`/`Cmd`+`D` | Global (not in an input/textarea/contenteditable) | Toggle the active document's bookmark |
+| `Ctrl`/`Cmd`+`D` | Global (not in an input/textarea/contenteditable and no modal dialog open) | Toggle the active document's bookmark |
 | `Enter` / `Space` | Focused row | Activate the document/section row |
 | `Enter` / `Space` | Focused star, Remove, Re-anchor | Perform that button's action; do not activate the row |
 | `Shift+F10` / ContextMenu | Focused navigation row | Open the row menu (includes Bookmark document) |

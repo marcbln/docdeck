@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::bookmark_filter::{filter_candidates, NotificationBookmarkFilter};
     use crate::config::NotifyMode;
     use crate::tray::{
         compose_presence_icon, notification_body, project_name, should_notify, Presence,
@@ -261,5 +262,31 @@ mod tests {
             notification_body(&[renamed, moved_out], 3),
             "renamed.md changed"
         );
+    }
+
+    // -- bookmark-filtered notification batches --------------------------------
+
+    fn bookmark_filter(enabled: bool, path: &str) -> NotificationBookmarkFilter {
+        let mut paths = std::collections::HashSet::new();
+        paths.insert(path.to_string());
+        NotificationBookmarkFilter { enabled, paths }
+    }
+
+    #[test]
+    fn filtered_batch_names_only_bookmarked_files() {
+        let changes = vec![
+            change("/x/bookmarked.md", true),
+            change("/x/other.md", true),
+        ];
+        let candidates = filter_candidates(&bookmark_filter(true, "/x/bookmarked.md"), &changes);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(notification_body(&candidates, 3), "bookmarked.md changed");
+    }
+
+    #[test]
+    fn an_empty_filtered_batch_has_nothing_to_notify() {
+        let changes = vec![change("/x/other.md", true)];
+        let candidates = filter_candidates(&bookmark_filter(true, "/x/bookmarked.md"), &changes);
+        assert!(candidates.is_empty());
     }
 }

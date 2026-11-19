@@ -3,6 +3,9 @@ import {
   validateLayout,
   type LayoutPreferences,
 } from "./layout-model";
+import type { BrowseMode } from "./sidebar-model";
+
+export type { BrowseMode } from "./sidebar-model";
 
 /** Single storage key. The version suffix lets a future schema change coexist
  *  with an old key rather than migrating it in place. */
@@ -11,7 +14,6 @@ const STORAGE_KEY = "docdeck.preferences.v1";
 const SCHEMA_VERSION = 1;
 
 export type ThemeMode = "dark" | "light";
-export type BrowseMode = "all" | "recent";
 
 export interface Preferences {
   themeMode: ThemeMode;
@@ -22,6 +24,8 @@ export interface Preferences {
   browseMode: BrowseMode;
   openSectionCollapsed: boolean;
   browseSectionCollapsed: boolean;
+  /** Notify only for bookmarked documents; composes with the tray mode. */
+  bookmarkNotificationsOnly: boolean;
   /** Remembered pane sizes; validated per field on load. */
   layout: LayoutPreferences;
 }
@@ -34,6 +38,7 @@ export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   browseMode: "recent",
   openSectionCollapsed: false,
   browseSectionCollapsed: false,
+  bookmarkNotificationsOnly: false,
   layout: DEFAULT_LAYOUT,
 });
 
@@ -47,7 +52,7 @@ function isThemeMode(value: unknown): value is ThemeMode {
 }
 
 function isBrowseMode(value: unknown): value is BrowseMode {
-  return value === "all" || value === "recent";
+  return value === "all" || value === "recent" || value === "bookmarks";
 }
 
 /**
@@ -101,6 +106,10 @@ function decode(raw: string | null): Preferences {
       typeof record.browseSectionCollapsed === "boolean"
         ? record.browseSectionCollapsed
         : DEFAULT_PREFERENCES.browseSectionCollapsed,
+    bookmarkNotificationsOnly:
+      typeof record.bookmarkNotificationsOnly === "boolean"
+        ? record.bookmarkNotificationsOnly
+        : DEFAULT_PREFERENCES.bookmarkNotificationsOnly,
     layout: validateLayout(record.layout),
   };
 }

@@ -260,3 +260,11 @@ exactly one popup names the bookmarked document while the tray dot reflects both
 - Keyboard shortcuts follow the application's existing conventions, with the document bookmark shortcut available from the active document; section bookmarks are reached through the outline, with no scroll-position section shortcut in the first release.
 - A user has at most a few hundred bookmarks; the feature must still behave predictably if that grows.
 - Watched documents remain strictly read-only.
+- **Coordination with 006-copy-markdown-content**: a separate, later feature
+  adds **Copy Markdown** to the same tab menu and a configurable copy shortcut.
+  This feature registers `Ctrl`/`Cmd`+`D` and the modal-open predicate in shared
+  seams so 006 can validate shortcut conflicts and suppress its shortcut behind
+  this feature's re-anchor picker. 006's shortcut setting lives in the
+  Config/Watches panel, not in the Bookmarks view, and its `shortcuts.toml`
+  store is added to the constitution's Persistence section by 006 itself.
+  The two features are implemented sequentially, 005 first.

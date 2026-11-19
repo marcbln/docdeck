@@ -110,6 +110,45 @@ describe("VirtualList", () => {
     expect(activated).toEqual(["a", "a"]);
   });
 
+  it("activates from the main control or row padding, never from a row action", () => {
+    document.body.innerHTML =
+      '<div id="host" style="height: 480px"><ul id="list"></ul></div>';
+    const host = document.getElementById("host") as HTMLDivElement;
+    const list = document.getElementById("list") as HTMLUListElement;
+    const activated: string[] = [];
+
+    const virtual = new VirtualList<string>(list, host, {
+      viewportHeight: VIEWPORT,
+      createRow: () => {
+        const row = document.createElement("li");
+        row.className = "inbox-row";
+        row.tabIndex = 0;
+        const main = document.createElement("button");
+        main.className = "inbox-row-main";
+        main.append(document.createElement("span"));
+        const star = document.createElement("button");
+        star.className = "inbox-bookmark";
+        row.append(main, star);
+        return row;
+      },
+      bindRow: (row, item) => {
+        row.dataset.path = item;
+      },
+      onActivate: (item) => activated.push(item),
+    });
+    virtual.setItems(["a"]);
+
+    const row = list.querySelector(".inbox-row") as HTMLElement;
+    const main = row.querySelector(".inbox-row-main") as HTMLButtonElement;
+    const star = row.querySelector(".inbox-bookmark") as HTMLButtonElement;
+
+    star.click();
+    main.click();
+    row.click();
+
+    expect(activated).toEqual(["a", "a"]);
+  });
+
   it("releases listeners without throwing on destroy", () => {
     const { virtual } = mount(["a"]);
     expect(() => virtual.destroy()).not.toThrow();

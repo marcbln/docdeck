@@ -130,12 +130,14 @@ is a pure function over the current `Heading[]`:
      candidate wins via **occurrence**, the documented last resort. When
      candidates have positive but tied evidence, the resolver returns
      **stale/ambiguous** rather than guessing.
-2. **No exact text** — candidates with the same depth that match at least one
-   window position. A unique highest score (at least one neighbour) wins via
-   **context**, which is the re-anchored case. Ties or no candidates →
-   **stale** (`ambiguous` or `missing`); occurrence is deliberately *not* used
-   here because the text changed, so an ordinal among new duplicate texts says
-   nothing reliable about the old section.
+2. **No exact text** — candidates with the same depth and consistent evidence on
+   both sides of the window (an empty matching side counts as evidence). A
+   unique highest score (at least one neighbour per side) wins via **context**,
+   which is the re-anchored case. Ties or no candidates → **stale**
+   (`ambiguous` or `missing`); occurrence is deliberately *not* used here
+   because the text changed, so an ordinal among new duplicate texts says
+   nothing reliable about the old section. Requiring both sides prevents a
+   deleted heading from handing its context to an unrelated neighbour.
 3. **Never guess** — a resolved slug must be the heading the rules chose; an
    unresolved bookmark must not scroll. Two bookmarks resolving to the same slug
    are both kept and flagged as shared targets rather than silently merged.
@@ -338,8 +340,9 @@ silent data loss.
 - The document row context menu gains `Bookmark document` /
   `Remove bookmark`.
 - `Ctrl`+`D` (macOS `Cmd`+`D`) toggles the active document. The handler ignores
-  events from inputs, textareas and contenteditable elements and prevents the
-  webview's default.
+  events from inputs, textareas and contenteditable elements, and from any
+  keyboard event while a modal dialog is open, and prevents the webview's
+  default.
 - A heading is bookmarked by focusing it in the outline and activating its star;
   there is deliberately no scroll-position section shortcut (clarified in the
   spec).

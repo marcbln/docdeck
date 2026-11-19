@@ -22,6 +22,7 @@ changed decision is a new ADR that supersedes the old one.
 | [261103-1](ADR__261103-1__upgrade-restart-via-instance-state-and-quit-channel.md) | Upgrade restarts use a runtime instance file and a `--quit` control channel | Accepted | 2026-11-03 |
 | [261103-2](ADR__261103-2__rig-summary-agent-with-session-snapshots.md) | Change summaries use a Rig agent over session snapshots and TOC tools | Accepted | 2026-11-03 |
 | [261106-1](ADR__261106-1__session-event-log-and-resizable-panes.md) | Session event log, single window-title permission and persisted pane layout | Accepted | 2026-11-06 |
+| [261115-1](ADR__261115-1__webview-owned-bookmarks-with-context-anchors.md) | Webview-owned bookmarks with context anchors and a metadata-only notification filter | Accepted | 2026-11-15 |
 
 ## Format
 

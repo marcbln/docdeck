@@ -3,18 +3,22 @@ import { compactPath, parentPath, projectName } from "./project";
 import type { InboxEntry } from "./inbox-model";
 
 /**
- * Row anatomy shared by the browse list and the pop-out inventory.
+ * Row anatomy shared by the browse list, the bookmarks view and the pop-out
+ * inventory.
  *
- * The row is two lines: a project chip plus filename, then the compacted parent
- * path and relative modification time.
+ * The row is two lines inside a real activation button; the bookmark star is a
+ * sibling button so no interactive control is nested inside another. Clicking
+ * the star never activates the row.
  */
 export function createInboxRow(): HTMLElement {
   const row = document.createElement("li");
   row.className = "inbox-row";
-  row.tabIndex = 0;
-  row.setAttribute("role", "button");
 
-  const top = document.createElement("div");
+  const main = document.createElement("button");
+  main.type = "button";
+  main.className = "inbox-row-main";
+
+  const top = document.createElement("span");
   top.className = "inbox-row-top";
   const chip = document.createElement("span");
   chip.className = "inbox-project";
@@ -24,7 +28,7 @@ export function createInboxRow(): HTMLElement {
   dot.className = "inbox-dot";
   top.append(chip, name, dot);
 
-  const bottom = document.createElement("div");
+  const bottom = document.createElement("span");
   bottom.className = "inbox-row-bottom";
   const parent = document.createElement("span");
   parent.className = "inbox-parent";
@@ -32,7 +36,15 @@ export function createInboxRow(): HTMLElement {
   time.className = "inbox-time";
   bottom.append(parent, time);
 
-  row.append(top, bottom);
+  main.append(top, bottom);
+
+  const bookmark = document.createElement("button");
+  bookmark.type = "button";
+  bookmark.className = "inbox-bookmark";
+  bookmark.setAttribute("aria-pressed", "false");
+  bookmark.textContent = "☆";
+
+  row.append(main, bookmark);
   return row;
 }
 
@@ -43,6 +55,7 @@ export function bindInboxRow(
   openPaths: ReadonlySet<string>,
   activePath: string | null,
   now: number,
+  bookmarked = false,
 ): void {
   row.dataset.path = entry.path;
   row.className = "inbox-row";
@@ -69,4 +82,15 @@ export function bindInboxRow(
   time.dateTime = new Date(entry.modifiedTime).toISOString();
   time.textContent = formatRelativeTime(entry.modifiedTime, now);
   time.title = formatExactTime(entry.modifiedTime);
+
+  const main = row.querySelector<HTMLButtonElement>(".inbox-row-main")!;
+  main.setAttribute("aria-label", `${entry.filename}${project ? ` in ${project}` : ""}`);
+
+  const star = row.querySelector<HTMLButtonElement>(".inbox-bookmark")!;
+  star.setAttribute("aria-pressed", String(bookmarked));
+  star.setAttribute("aria-label", bookmarked
+    ? `Remove bookmark for ${entry.filename}`
+    : `Bookmark ${entry.filename}`);
+  star.title = bookmarked ? "Remove bookmark" : "Bookmark document";
+  star.textContent = bookmarked ? "★" : "☆";
 }

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Document and section bookmarks**: star a whole document from the header,
+  any navigation row, the row context menu, or `Ctrl`/`Cmd`+`D`; star an outline
+  heading from its new control. A third **Bookmarks** browse mode lists them
+  beside All documents and Recently changed, nests headings under their
+  document, applies the shared filter, and keeps the same unread meaning.
+  Section bookmarks store heading text, depth and a two-heading context window,
+  resolve by text first and context second, show **Not found** instead of
+  scrolling to the wrong place, and can be re-anchored from the current outline.
+  Bookmarks persist in `docdeck.bookmarks.v1`; removals are undoable and
+  renames keep both kinds attached.
+- **Bookmark-only notifications**: an opt-in checkbox in the Bookmarks toolbar
+  narrows desktop popups to documents bookmarked in full or by heading, while
+  the tray presence dot continues to reflect every change.
 - **Descriptive window title**: the OS title now reads
   `project — filename — docdeck` for documents under a project's `_ai` folder,
   omits the project outside one, and is exactly `docdeck` when no document is

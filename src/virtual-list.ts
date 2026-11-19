@@ -53,9 +53,19 @@ export interface VirtualListOptions<T> {
   onActivate?(item: T): void;
   rowHeight?: number;
   overscan?: number;
+  /** Row container selector; defaults to the inbox and open-row shapes. */
+  rowSelector?: string;
+  /**
+   * The control that activates a row. Clicks on any other button or anchor are
+   * row actions and must not activate it.
+   */
+  activationSelector?: string;
   /** Test seam; production measures the scroll host. */
   viewportHeight?: number;
 }
+
+const DEFAULT_ROW_SELECTOR = ".inbox-row, .sidebar-row";
+const DEFAULT_ACTIVATION_SELECTOR = ".inbox-row-main, .sidebar-row-main";
 
 /**
  * A virtualized list bound to one scroll host.
@@ -70,6 +80,8 @@ export class VirtualList<T> {
   private rafId: number | null = null;
   private readonly rowHeight: number;
   private readonly overscan: number;
+  private readonly rowSelector: string;
+  private readonly activationSelector: string;
 
   private readonly onScroll = (): void => this.schedule();
 
@@ -80,6 +92,9 @@ export class VirtualList<T> {
   ) {
     this.rowHeight = options.rowHeight ?? ROW_HEIGHT;
     this.overscan = options.overscan ?? OVERSCAN;
+    this.rowSelector = options.rowSelector ?? DEFAULT_ROW_SELECTOR;
+    this.activationSelector =
+      options.activationSelector ?? DEFAULT_ACTIVATION_SELECTOR;
     this.scrollHost.addEventListener("scroll", this.onScroll, { passive: true });
     this.bindRowEvents();
   }
@@ -107,10 +122,13 @@ export class VirtualList<T> {
 
   private bindRowEvents(): void {
     const activate = (event: Event): void => {
-      const row = (event.target as Element | null)?.closest<HTMLElement>(
-        ".inbox-row, .sidebar-row",
-      );
+      const target = event.target as Element | null;
+      const row = target?.closest<HTMLElement>(this.rowSelector);
       if (!row) return;
+      // A click on any control other than the main activation button is a row
+      // action (star, close, Remove, Re-anchor). Row padding activates.
+      const control = target?.closest<HTMLElement>("button, a");
+      if (control && !control.matches(this.activationSelector)) return;
       const index = Number(row.dataset.index);
       if (!Number.isInteger(index)) return;
       const item = this.items[index];
@@ -122,8 +140,10 @@ export class VirtualList<T> {
     this.list.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       const row = (event.target as Element | null)?.closest<HTMLElement>(
-        ".inbox-row, .sidebar-row",
+        this.rowSelector,
       );
+      // A focused row activates; a focused main button activates natively via
+      // its own click, so handling it here would fire twice.
       if (!row || event.target !== row) return;
       event.preventDefault();
       activate(event);

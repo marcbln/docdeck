@@ -12,6 +12,8 @@ export interface TocPanelOptions {
   scrollParent: HTMLElement;
   /** Expands the metadata table before scrolling to it. */
   onJumpToMetadata?: () => void;
+  /** Toggles a section bookmark for this exact outline heading. */
+  onToggleBookmark?: (heading: Heading) => void;
 }
 
 /**
@@ -24,6 +26,7 @@ export interface TocPanelOptions {
 export class TocPanel {
   private observer: IntersectionObserver | null = null;
   private readonly entryBySlug = new Map<string, HTMLLIElement>();
+  private readonly starBySlug = new Map<string, HTMLButtonElement>();
   private readonly headings: Heading[] = [];
   private readonly metadataEntry: HTMLLIElement;
   private readonly list: HTMLUListElement;
@@ -57,6 +60,7 @@ export class TocPanel {
     this.headings.splice(0, this.headings.length, ...headings);
     this.list.replaceChildren();
     this.entryBySlug.clear();
+    this.starBySlug.clear();
     this.disconnect();
 
     if (headings.length === 0) {
@@ -78,13 +82,73 @@ export class TocPanel {
         this.scrollTo(heading.slug);
       });
 
-      item.appendChild(link);
+      const star = document.createElement("button");
+      star.type = "button";
+      star.className = "toc-bookmark";
+      star.setAttribute("aria-pressed", "false");
+      star.setAttribute(
+        "aria-label",
+        `Bookmark ${heading.text.length > 0 ? heading.text : "untitled heading"}`,
+      );
+      star.title = "Bookmark section";
+      star.textContent = "☆";
+      star.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.options.onToggleBookmark?.(heading);
+      });
+
+      item.append(link, star);
       this.list.appendChild(item);
       this.entryBySlug.set(heading.slug, item);
+      this.starBySlug.set(heading.slug, star);
     }
 
     this.observe();
   }
+
+  /**
+   * Applies the current bookmark state to every outline star.
+   *
+   * `shared` counts bookmarks resolving to the same slug; more than one turns
+   * the star mixed, and activating it removes every colliding bookmark.
+   */
+  public setBookmarkedSlugs(
+    slugs: ReadonlySet<string>,
+    shared: ReadonlyMap<string, number> = new Map(),
+  ): void {
+    for (const [slug, star] of this.starBySlug) {
+      const count = shared.get(slug) ?? 0;
+      const bookmarked = slugs.has(slug) || count > 0;
+      if (count > 1) {
+        star.setAttribute("aria-pressed", "mixed");
+        star.classList.add("mixed");
+        star.classList.toggle("bookmarked", true);
+        star.textContent = "★";
+        star.title = `${count} bookmarks target this heading; activate to remove them`;
+        star.setAttribute(
+          "aria-label",
+          `${count} bookmarks target this heading; activate to remove them`,
+        );
+      } else {
+        star.setAttribute("aria-pressed", String(bookmarked));
+        star.classList.toggle("bookmarked", bookmarked);
+        star.classList.remove("mixed");
+        star.textContent = bookmarked ? "★" : "☆";
+        star.title = bookmarked ? "Remove section bookmark" : "Bookmark section";
+        const heading = this.headings.find((candidate) => candidate.slug === slug);
+        const text =
+          heading && heading.text.length > 0 ? heading.text : "untitled heading";
+        star.setAttribute(
+          "aria-label",
+          bookmarked
+            ? `Remove bookmark for ${text}`
+            : `Bookmark ${text}`,
+        );
+      }
+    }
+  }
+
 
   private scrollTo(slug: string): void {
     if (scrollToAnchor(this.options.scrollParent, slug)) this.setActive(slug);

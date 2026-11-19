@@ -1,3 +1,9 @@
+import {
+  formatShortcutHint,
+  shortcutById,
+  shortcutPlatform,
+} from "./shortcuts";
+
 /** Where a tab menu should open: pointer coordinates or a tab's rectangle. */
 export type TabMenuAnchor = { x: number; y: number } | { rect: DOMRect };
 
@@ -11,6 +17,12 @@ export type CopyPathHandler = (path: string) => void;
 
 /** Called when the user asks to copy the tab's file reference. */
 export type CopyFileHandler = (path: string) => void;
+
+/** Document bookmark state and toggle supplied by the app. */
+export interface TabMenuBookmarkActions {
+  isBookmarked(path: string): boolean;
+  toggle(path: string): void;
+}
 
 /**
  * Singleton context menu for the tab bar.
@@ -44,6 +56,7 @@ export class TabContextMenu {
     private readonly onCopyPath: CopyPathHandler,
     private readonly onCopyFile: CopyFileHandler,
     private readonly host: HTMLElement = document.body,
+    private readonly bookmarkActions?: TabMenuBookmarkActions,
   ) {}
 
   public get isOpen(): boolean {
@@ -66,12 +79,25 @@ export class TabContextMenu {
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "Tab actions");
 
-    const addItem = (label: string, action: CopyPathHandler): HTMLButtonElement => {
+    const addItem = (
+      label: string,
+      action: CopyPathHandler,
+      hint?: string,
+    ): HTMLButtonElement => {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "tab-menu-item";
       item.setAttribute("role", "menuitem");
-      item.textContent = label;
+      const text = document.createElement("span");
+      text.className = "tab-menu-label";
+      text.textContent = label;
+      item.append(text);
+      if (hint !== undefined) {
+        const hintEl = document.createElement("span");
+        hintEl.className = "tab-menu-hint";
+        hintEl.textContent = hint;
+        item.append(hintEl);
+      }
       item.addEventListener("click", () => {
         const target = this.path;
         this.close(true);
@@ -81,7 +107,23 @@ export class TabContextMenu {
       return item;
     };
 
-    const firstItem = addItem("Copy absolute path", this.onCopyPath);
+    // The bookmark label reflects state at open time; the copy actions keep
+    // their existing order when no bookmark actions are supplied.
+    let firstItem: HTMLButtonElement;
+    if (this.bookmarkActions !== undefined) {
+      const bookmarked = this.bookmarkActions.isBookmarked(path);
+      const bookmark = shortcutById("toggle-bookmark");
+      firstItem = addItem(
+        bookmarked ? "Remove bookmark" : "Bookmark document",
+        (target) => this.bookmarkActions?.toggle(target),
+        bookmark
+          ? formatShortcutHint(bookmark, shortcutPlatform())
+          : undefined,
+      );
+      addItem("Copy absolute path", this.onCopyPath);
+    } else {
+      firstItem = addItem("Copy absolute path", this.onCopyPath);
+    }
     addItem("Copy file", this.onCopyFile);
 
     this.menu = menu;

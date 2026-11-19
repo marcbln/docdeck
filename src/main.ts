@@ -3,6 +3,15 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { Acknowledgements } from "./acknowledgements";
+import {
+  captureAnchor,
+  resolveHeading,
+  type HeadingResolution,
+} from "./bookmark-anchors";
+import { BookmarksController } from "./bookmarks-controller";
+import { removedBookmarkLabel } from "./bookmarks-model";
+import { buildBookmarkView, type BookmarkSectionView } from "./bookmarks-view";
+import { BookmarkPicker } from "./bookmark-picker";
 import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
 import {
   type SaveOutcome,
@@ -62,12 +71,18 @@ import {
 import { fileName, isUnderAny } from "./project";
 import { composeWindowTitle } from "./window-title";
 import { scrollToAnchor } from "./scroll";
+import {
+  isModalOpen,
+  isTypingTarget,
+  matchesShortcut,
+  shortcutById,
+} from "./shortcuts";
 import { StatusBar } from "./status-bar";
 import { deriveStatusBar } from "./status-view";
 import { adjacentTabPath, tabCycleDirection, type TabCycleDirection } from "./tab-cycle";
 import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
-import { extractHeadings } from "./toc";
+import { extractHeadings, type Heading } from "./toc";
 import { TocPanel } from "./toc-panel";
 import { ThemeController } from "./theme";
 import { ToastHost } from "./toast";
@@ -175,6 +190,8 @@ class AppState {
   private readonly contentContainer = must<HTMLElement>("content-container");
   private readonly tocPanelEl = must<HTMLElement>("toc-panel");
   private readonly autosortBtn = must<HTMLButtonElement>("toggle-autosort-btn");
+  private readonly bookmarkToggleBtn =
+    must<HTMLButtonElement>("toggle-bookmark-btn");
 
   private readonly writer = createPreferenceWriter();
   private readonly tocPanel: TocPanel;
@@ -183,6 +200,10 @@ class AppState {
   private readonly toast = new ToastHost();
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
+  private readonly bookmarks: BookmarksController;
+  private readonly bookmarkPicker = new BookmarkPicker();
+  /** Outline of the active rendered document; section actions use it. */
+  private activeHeadings: Heading[] = [];
 
   /** Roots registered from the config or a CLI folder for this session. */
   private readonly watchRoots = new Set<string>();
@@ -239,6 +260,20 @@ class AppState {
 
   constructor() {
     this.acks = new Acknowledgements();
+    this.bookmarks = new BookmarksController({
+      syncNotifications: (filter) => this.syncBookmarkNotifications(filter),
+      notificationEnabled: () => this.preferences.bookmarkNotificationsOnly,
+      onChange: () => this.onBookmarksChanged(),
+      onNotificationError: (error) => {
+        console.error("Failed to sync the bookmark notification filter", error);
+        if (this.preferences.bookmarkNotificationsOnly) {
+          this.toast.show(
+            `Could not update bookmark notifications: ${describeError(error)}`,
+            "error",
+          );
+        }
+      },
+    });
     this.configPanel = new ConfigPanel({
       readConfig: () => invoke<WatchConfigView>("read_watch_config"),
       saveConfig: (args: SaveWatchConfigArgs) =>
@@ -283,6 +318,7 @@ class AppState {
       container: this.tocPanelEl,
       scrollParent: this.contentContainer,
       onJumpToMetadata: () => this.metadata.reveal(),
+      onToggleBookmark: (heading) => this.toggleSectionBookmark(heading),
     });
 
     this.find = new FindController({
@@ -297,6 +333,11 @@ class AppState {
       },
       (path) => {
         void this.copyTabFile(path);
+      },
+      document.body,
+      {
+        isBookmarked: (path) => this.bookmarks.isDocumentBookmarked(path),
+        toggle: (path) => this.toggleDocumentBookmark(path),
       },
     );
 
@@ -331,6 +372,13 @@ class AppState {
         this.filterTerm = term;
         this.renderSidebar();
       },
+      onToggleDocumentBookmark: (path) =>
+        this.toggleDocumentBookmark(path),
+      onSectionActivate: (section) => this.activateSection(section),
+      onSectionRemove: (id) => this.removeSectionBookmark(id),
+      onSectionReanchor: (id) => this.openSectionReanchor(id),
+      onBookmarkNotificationsChange: (enabled) =>
+        this.setBookmarkNotificationsOnly(enabled),
       onToggleSection: (section, collapsed) => {
         if (section === "open") {
           this.preferences.openSectionCollapsed = collapsed;
@@ -528,6 +576,7 @@ class AppState {
   private async start(): Promise<void> {
     // Listeners first, so no CLI or watcher event can arrive unhandled.
     await this.bindBackend();
+    this.bookmarks.syncNotifications();
     await this.loadStartupPaths();
   }
 
@@ -559,6 +608,10 @@ class AppState {
   private bindControls(): void {
     const watchesBtn = document.getElementById("toggle-watches-btn");
     watchesBtn?.addEventListener("click", () => void this.openConfigPanel());
+
+    this.bookmarkToggleBtn.addEventListener("click", () =>
+      this.toggleActiveBookmark(),
+    );
 
     this.autosortBtn.addEventListener("click", () => {
       this.autoSort = !this.autoSort;
@@ -640,7 +693,10 @@ class AppState {
    * made in the last debounce window survives the restart.
    */
   private bindConfigLifecycle(): void {
-    const flush = (): void => this.acks.flush();
+    const flush = (): void => {
+      this.acks.flush();
+      this.bookmarks.flush();
+    };
     window.addEventListener("pagehide", flush);
     window.addEventListener("beforeunload", flush);
   }
@@ -786,8 +842,19 @@ class AppState {
 
   /** Browser-style tab shortcuts: Ctrl+Shift+T reopens, Ctrl+Tab cycles. */
   private bindShortcuts(): void {
+    const bookmarkShortcut = shortcutById("toggle-bookmark");
     window.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
+
+      if (
+        bookmarkShortcut !== undefined &&
+        matchesShortcut(event, bookmarkShortcut)
+      ) {
+        if (isTypingTarget(event.target) || isModalOpen()) return;
+        event.preventDefault();
+        this.toggleActiveBookmark();
+        return;
+      }
 
       if (isReopenClosedTabShortcut(event)) {
         event.preventDefault();
@@ -1090,6 +1157,7 @@ class AppState {
 
     const moved = this.inbox.rename(from, change.path);
     this.acks.move(from, change.path);
+    this.bookmarks.rename(from, change.path);
 
     let inboxChanged = moved;
     if (!moved && this.isTracked(change.path)) {
@@ -1122,6 +1190,7 @@ class AppState {
     if (tab && !wasDeleted) tab.deletedOnDisk = true;
 
     const removed = this.inbox.removeForMoveOut(change.path);
+    if (isActive) this.bookmarks.retainResolutionsForPath(null);
     if (this.acknowledgementsReady) {
       this.acks.prune(this.inbox.entriesSorted().map((entry) => entry.path));
     }
@@ -1166,6 +1235,7 @@ class AppState {
     const isActive = this.activePath === change.path;
     const wasDeleted = tab?.deletedOnDisk ?? false;
     if (tab && !wasDeleted) tab.deletedOnDisk = true;
+    if (isActive) this.bookmarks.retainResolutionsForPath(null);
 
     return {
       inboxChanged:
@@ -1529,6 +1599,13 @@ class AppState {
   private renderSidebar(): void {
     const entries = this.inbox.entriesSorted();
     const inventory = entries.filter((entry) => !entry.inventoryHidden);
+    const bookmarks = buildBookmarkView({
+      collection: this.bookmarks.snapshot,
+      inventory,
+      filterTerm: this.filterTerm,
+      resolutions: this.bookmarks.resolutionMap,
+      unread: (_path, entry) => entry?.unread ?? false,
+    });
     this.sidebarPanel.render({
       openRows: buildOpenRows(
         this.tabs.values(),
@@ -1551,7 +1628,232 @@ class AppState {
       filterTerm: this.filterTerm,
       summary: this.summaryStatus,
       summaryBusy: this.summaryBusy,
+      bookmarks,
+      bookmarkedPaths: new Set(
+        this.bookmarks.documents.map((bookmark) => bookmark.path),
+      ),
+      bookmarkNotificationsOnly: this.preferences.bookmarkNotificationsOnly,
       now: Date.now(),
+    });
+    this.updateBookmarkToggle();
+  }
+
+  private updateBookmarkToggle(): void {
+    const active = this.activePath !== null ? this.tabs.get(this.activePath) : undefined;
+    const pressed =
+      this.activePath !== null &&
+      this.bookmarks.isDocumentBookmarked(this.activePath);
+    this.bookmarkToggleBtn.disabled = active === undefined;
+    this.bookmarkToggleBtn.setAttribute("aria-pressed", String(pressed));
+    this.bookmarkToggleBtn.textContent = pressed
+      ? "★ Bookmark: ON"
+      : "☆ Bookmark: OFF";
+    this.bookmarkToggleBtn.title = pressed
+      ? "Remove the active document's bookmark (Ctrl/Cmd+D)"
+      : "Bookmark the active document (Ctrl/Cmd+D)";
+  }
+
+  private toggleActiveBookmark(): void {
+    if (this.activePath === null) return;
+    this.toggleDocumentBookmark(this.activePath);
+  }
+
+  /** Toggles a document marker without changing the active document. */
+  private toggleDocumentBookmark(path: string): void {
+    const wasBookmarked = this.bookmarks.isDocumentBookmarked(path);
+    const bookmarked = this.bookmarks.toggleDocument(path);
+    if (wasBookmarked && !bookmarked) this.showBookmarkUndoToast();
+  }
+
+  private showBookmarkUndoToast(): void {
+    const removed = this.bookmarks.lastRemoved;
+    if (removed === null) return;
+    this.toast.show(removedBookmarkLabel(removed), "info", {
+      label: "Undo",
+      onClick: () => {
+        this.bookmarks.undo();
+      },
+    });
+  }
+
+  private removeSectionBookmark(id: string): void {
+    if (this.bookmarks.removeSection(id) !== null) {
+      this.showBookmarkUndoToast();
+    }
+  }
+
+  private setBookmarkNotificationsOnly(enabled: boolean): void {
+    this.preferences.bookmarkNotificationsOnly = enabled;
+    this.persist();
+    this.bookmarks.syncNotifications();
+    this.renderSidebar();
+  }
+
+  private syncBookmarkNotifications(
+    filter: { enabled: boolean; paths: string[] },
+  ): Promise<void> {
+    return invoke("set_bookmark_notification_filter", { filter }).then(
+      () => undefined,
+    );
+  }
+
+  private onBookmarksChanged(): void {
+    this.updateBookmarkToggle();
+    this.renderSidebar();
+    this.refreshTocBookmarks();
+  }
+
+  /** Applies the current session resolutions to the outline stars. */
+  private refreshTocBookmarks(): void {
+    if (this.activePath === null) {
+      this.tocPanel.setBookmarkedSlugs(new Set());
+      return;
+    }
+    const slugs = new Set<string>();
+    const shared = new Map<string, number>();
+    for (const section of this.bookmarks.sectionsForPath(this.activePath)) {
+      const resolution = this.bookmarks.getResolution(section.id);
+      if (resolution?.kind !== "resolved") continue;
+      slugs.add(resolution.slug);
+      shared.set(resolution.slug, (shared.get(resolution.slug) ?? 0) + 1);
+    }
+    this.tocPanel.setBookmarkedSlugs(slugs, shared);
+  }
+
+  /** Resolves every section bookmark of the active document in one pass. */
+  private resolveActiveSections(): void {
+    if (this.activePath === null) return;
+    const entries: Array<readonly [string, HeadingResolution]> =
+      this.bookmarks
+        .sectionsForPath(this.activePath)
+        .map(
+          (section) =>
+            [
+              section.id,
+              resolveHeading(section.anchor, this.activeHeadings),
+            ] as const,
+        );
+    this.bookmarks.setResolutions(entries);
+  }
+
+  private toggleSectionBookmark(heading: Heading): void {
+    if (this.activePath === null) return;
+    const index = this.activeHeadings.findIndex(
+      (candidate) => candidate.slug === heading.slug,
+    );
+    if (index === -1) return;
+
+    const path = this.activePath;
+    const resolving = this.bookmarks
+      .sectionsForPath(path)
+      .filter((section) => {
+        const resolution = this.bookmarks.getResolution(section.id);
+        return (
+          resolution?.kind === "resolved" &&
+          resolution.slug === heading.slug
+        );
+      });
+
+    if (resolving.length > 0) {
+      this.bookmarks.removeSections(resolving.map((section) => section.id));
+      this.showBookmarkUndoToast();
+    } else {
+      const removed = this.bookmarks.toggleSection(
+        path,
+        captureAnchor(this.activeHeadings, index),
+      );
+      if (removed.length > 0) this.showBookmarkUndoToast();
+    }
+
+    this.resolveActiveSections();
+    this.refreshTocBookmarks();
+  }
+
+  private activateSection(section: BookmarkSectionView): void {
+    if (section.status === "unavailable") return;
+    void this.doActivateSection(section);
+  }
+
+  private async doActivateSection(
+    section: BookmarkSectionView,
+  ): Promise<void> {
+    const bookmark = this.bookmarks.sectionById(section.id);
+    if (bookmark === undefined) return;
+
+    if (this.activePath !== bookmark.path) {
+      if (this.tabs.has(bookmark.path)) {
+        await this.setActiveTab(bookmark.path);
+      } else if (!(await this.openDocument(bookmark.path))) {
+        return;
+      }
+    }
+    if (this.activePath !== bookmark.path) return;
+
+    const resolution = resolveHeading(bookmark.anchor, this.activeHeadings);
+    this.bookmarks.setResolution(bookmark.id, resolution);
+
+    if (resolution.kind === "stale") {
+      this.toast.show(
+        "That section was not found. Re-anchor it from the Bookmarks view.",
+        "info",
+      );
+      return;
+    }
+
+    scrollToAnchor(this.contentContainer, resolution.slug);
+
+    // Confirm the current position so later edits resolve from this anchor.
+    this.bookmarks.reanchorSection(
+      bookmark.id,
+      captureAnchor(this.activeHeadings, resolution.index),
+    );
+    this.bookmarks.setResolution(bookmark.id, resolution);
+    this.refreshTocBookmarks();
+  }
+
+  private openSectionReanchor(id: string): void {
+    void this.doOpenSectionReanchor(id);
+  }
+
+  private async doOpenSectionReanchor(id: string): Promise<void> {
+    const bookmark = this.bookmarks.sectionById(id);
+    if (bookmark === undefined) return;
+
+    if (this.activePath !== bookmark.path) {
+      if (this.tabs.has(bookmark.path)) {
+        await this.setActiveTab(bookmark.path);
+      } else if (!(await this.openDocument(bookmark.path))) {
+        return;
+      }
+    }
+    if (this.activePath !== bookmark.path) return;
+
+    const current = this.bookmarks.getResolution(id);
+    const returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    // Snapshot the outline the picker shows; a background reload may replace
+    // the live list while the modal is open.
+    const pickerHeadings = [...this.activeHeadings];
+
+    this.bookmarkPicker.open({
+      path: bookmark.path,
+      sectionText: bookmark.anchor.text,
+      headings: pickerHeadings,
+      currentIndex: current?.kind === "resolved" ? current.index : null,
+      returnFocus,
+      onSelect: (index) => {
+        const anchor = captureAnchor(pickerHeadings, index);
+        this.bookmarks.reanchorSection(id, anchor);
+        const resolution = resolveHeading(anchor, this.activeHeadings);
+        if (resolution.kind === "resolved") {
+          this.bookmarks.setResolution(id, { ...resolution, via: "picker" });
+        }
+        this.refreshTocBookmarks();
+        this.toast.show("Section re-anchored", "info");
+      },
+      onRemove: () => this.removeSectionBookmark(id),
     });
   }
 
@@ -1676,17 +1978,20 @@ class AppState {
     // overlay). Close it before the viewer is detached so the placeholder is
     // restored and `#app` is no longer inert.
     closeMermaidOverlay();
+    this.bookmarks.retainResolutionsForPath(this.activePath);
 
     const tab = this.activePath ? this.tabs.get(this.activePath) : undefined;
 
     if (!tab) {
       this.find.close();
       this.renderedPath = null;
+      this.activeHeadings = [];
       this.emptyState.classList.remove("hidden");
       this.viewer.classList.add("hidden");
       this.viewer.replaceChildren();
       this.metadata.clear();
       this.tocPanel.rebuild([]);
+      this.refreshTocBookmarks();
       return;
     }
 
@@ -1714,6 +2019,7 @@ class AppState {
       this.viewer.replaceChildren();
 
       const headings = extractHeadings(marked, body);
+      this.activeHeadings = headings;
       await renderMarkdown(body, this.viewer, headings, switching ? "top" : "preserve");
 
       if (raw !== null && this.preferences.frontmatterVisible) {
@@ -1734,9 +2040,15 @@ class AppState {
       }
 
       this.tocPanel.rebuild(headings);
+      this.resolveActiveSections();
+      this.refreshTocBookmarks();
     } catch (error) {
       console.error("Failed to render markdown", error);
       this.find.close();
+      this.activeHeadings = [];
+      this.bookmarks.retainResolutionsForPath(null);
+      this.tocPanel.rebuild([]);
+      this.refreshTocBookmarks();
       this.showMessage(`Could not render ${tab.filename}`);
     }
 

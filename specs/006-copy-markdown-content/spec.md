@@ -1,6 +1,6 @@
 # Feature Specification: Copy Markdown Content
 
-**Feature Branch**: `005-copy-markdown-content`
+**Feature Branch**: `006-copy-markdown-content`
 
 **Created**: 2026-11-19
 
@@ -221,3 +221,39 @@ confirm it is rejected.
   config directory; the watch `config.toml` is unchanged.
 - Only the copy shortcut is remappable in this feature; the other app shortcuts
   are out of scope for remapping.
+
+## Dependencies and coordination with 005-document-bookmarks
+
+This feature is planned and implemented **after**
+`005-document-bookmarks`, which is already fully tasked. 005 adds **Bookmark
+document / Remove bookmark** to the same tab context menu and `Ctrl`/`Cmd`+`D`
+as an application shortcut. The two features must not be implemented
+concurrently because they edit `src/main.ts`, `src/tab-menu.ts`, `src/style.css`,
+`README.md` and `CHANGELOG.md`.
+
+Reconciliation decisions:
+
+- 005 adds a shared `src/shortcuts.ts` registry containing the fixed shortcuts
+  (`Ctrl`/`Cmd`+`D`, `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`,
+  `Ctrl`/`Cmd`+`Shift`+`T`, `Ctrl`/`Cmd`+`` ` ``, `Ctrl`/`Cmd`+`F`), a
+  platform-aware label formatter and a typing-target guard. This feature reuses
+  that registry for conflict validation; it must not introduce a second shortcut
+  parser or formatter.
+- 005 adds a generic tab-menu item helper accepting a label, an optional
+  shortcut hint and a callback. This feature adds its **Copy Markdown** item
+  through that helper; it does not restructure the menu again.
+- 005 adds the `BookmarkPicker` modal with `role="dialog"` and
+  `aria-modal="true"`, and a shared modal-open predicate. This feature's
+  shortcut suppression must include that picker in addition to the browse,
+  config, summary and Mermaid-fullscreen dialogs.
+- The shortcut editor lives in the existing Config/Watches panel. It must not be
+  added to the Bookmarks toolbar, where 005 places its notification setting.
+- Persistence stays separate: 005 owns `docdeck.bookmarks.v1` and the two
+  `docdeck.preferences.v1` fields. This feature owns `shortcuts.toml` and amends
+  the constitution's Persistence section itself when implemented; 005's
+  amendment deliberately does not pre-declare this store.
+- A valid copy shortcut must reject the fixed shortcuts above as conflicts, so
+  `Ctrl`/`Cmd`+`D` is unavailable for remapping to the copy action.
+
+This section is a planning constraint, not an implementation of feature 006. Its
+own plan, tasks and quickstart are produced after 005 lands.

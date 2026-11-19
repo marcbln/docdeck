@@ -1,6 +1,7 @@
 //! Application wiring: builder, single-instance IPC, plugin setup.
 
 mod clipboard;
+mod bookmark_filter;
 mod commands;
 mod config;
 mod config_edit;
@@ -18,6 +19,8 @@ mod watcher;
 
 #[cfg(test)]
 mod clipboard_test;
+#[cfg(test)]
+mod bookmark_filter_test;
 #[cfg(test)]
 mod commands_test;
 #[cfg(test)]
@@ -150,6 +153,7 @@ pub fn run() {
     builder
         .manage(watcher_state)
         .manage(ConfigWatchState::new())
+        .manage(bookmark_filter::BookmarkFilterState::new())
         .manage(std::sync::Arc::new(summary::SummaryStore::new()))
         .on_window_event(|window, event| {
             // Regaining focus means the user has seen the changes: retire the
@@ -208,6 +212,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             clipboard::copy_file_reference,
+            bookmark_filter::set_bookmark_notification_filter,
             commands::load_file,
             commands::close_file,
             commands::load_watches,

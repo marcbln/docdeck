@@ -140,4 +140,52 @@ describe("InboxBrowser", () => {
 
     expect(document.querySelector(".inbox-modal-count")?.textContent).toBe("2 files");
   });
+
+  it("renders bookmark stars and toggles them without opening", () => {
+    const onOpen = vi.fn();
+    const onToggleBookmark = vi.fn();
+    const browser = new InboxBrowser({
+      onOpen,
+      onToggleBookmark,
+      now: () => NOW,
+      viewportHeight: VIEWPORT,
+    });
+    const all = entries(3);
+    browser.open(
+      all,
+      new Set(),
+      null,
+      "ignored",
+      new Set([all[0].path]),
+    );
+
+    const rows = [...document.querySelectorAll<HTMLElement>(".inbox-row")];
+    const star = rows[0].querySelector<HTMLButtonElement>(".inbox-bookmark")!;
+    expect(star.getAttribute("aria-pressed")).toBe("true");
+    expect(star.getAttribute("aria-label")).toBe(
+      `Remove bookmark for ${all[0].filename}`,
+    );
+
+    star.click();
+    expect(onToggleBookmark).toHaveBeenCalledWith(all[0].path);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(document.querySelector(".inbox-overlay")).not.toBeNull();
+
+    (rows[0].querySelector(".inbox-row-main") as HTMLButtonElement).click();
+    expect(onOpen).toHaveBeenCalledWith(all[0].path);
+    expect(document.querySelector(".inbox-overlay")).toBeNull();
+  });
+
+  it("refreshes star state when the bookmark set changes", () => {
+    const browser = new InboxBrowser({ onOpen: vi.fn(), now: () => NOW, viewportHeight: VIEWPORT });
+    const all = entries(2);
+    browser.open(all, new Set(), null, "ignored", new Set());
+
+    const firstStar = () =>
+      document.querySelector<HTMLButtonElement>(".inbox-bookmark")!;
+    expect(firstStar().getAttribute("aria-pressed")).toBe("false");
+
+    browser.setBookmarkedPaths(new Set([all[0].path]));
+    expect(firstStar().getAttribute("aria-pressed")).toBe("true");
+  });
 });

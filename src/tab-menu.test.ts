@@ -170,4 +170,42 @@ describe("TabContextMenu", () => {
     fire(document, "scroll");
     expect(document.querySelector(".tab-menu")).toBeNull();
   });
+
+  it("offers a dynamic bookmark item with a shortcut hint", () => {
+    const bookmarked = new Set<string>();
+    const onToggle = vi.fn((path: string) => {
+      if (bookmarked.has(path)) bookmarked.delete(path);
+      else bookmarked.add(path);
+    });
+    const withBookmarks = new TabContextMenu(
+      (path) => onCopyPath(path),
+      (path) => onCopyFile(path),
+      document.body,
+      {
+        isBookmarked: (path) => bookmarked.has(path),
+        toggle: onToggle,
+      },
+    );
+
+    withBookmarks.open("/tmp/a.md", { x: 10, y: 20 }, trigger);
+    const items = document.querySelectorAll<HTMLButtonElement>(".tab-menu-item");
+    expect(items).toHaveLength(3);
+    expect(items[0].querySelector(".tab-menu-label")?.textContent).toBe(
+      "Bookmark document",
+    );
+    expect(items[0].querySelector(".tab-menu-hint")?.textContent).toMatch(
+      /\((Ctrl|Cmd)\+D\)/,
+    );
+
+    items[0].click();
+    expect(onToggle).toHaveBeenCalledWith("/tmp/a.md");
+    expect(onCopyPath).not.toHaveBeenCalled();
+    expect(document.querySelector(".tab-menu")).toBeNull();
+
+    withBookmarks.open("/tmp/a.md", { x: 10, y: 20 }, trigger);
+    expect(
+      document.querySelector(".tab-menu-item .tab-menu-label")?.textContent,
+    ).toBe("Remove bookmark");
+    withBookmarks.close();
+  });
 });

@@ -128,6 +128,8 @@ src/
 ├── toast.test.ts                 # EXTEND action click, replacement, timeout
 ├── preferences.ts                # EXTEND browse mode + bookmark notifications preference
 ├── preferences.test.ts           # EXTEND defaults, legacy payload, invalid values
+├── shortcuts.ts                  # NEW fixed-shortcut registry, label formatter, typing/modal guards
+├── shortcuts.test.ts             # NEW matching, formatting, typing guard and modal predicate cases
 ├── virtual-list.ts               # EXTEND ignore inner-button clicks; configurable row selector
 ├── virtual-list.test.ts          # EXTEND button click/keyboard does not activate the row
 ├── style.css                     # EXTEND stars, nested section rows, picker, setting, empty/stale states
@@ -159,6 +161,13 @@ focusable and announced without nesting interactive controls. `main.ts` remains
 the single orchestrator that connects document lifecycle, watcher events and the
 new typed notification command. The only Rust module is a bounded filter state
 used by the existing tray, because OS notification delivery stays in Rust.
+
+A small `shortcuts.ts` module is the shared seam for the application's fixed
+shortcut set, platform-aware hints, the typing-target guard and the modal-open
+predicate. It exists now because `Ctrl`/`Cmd`+`D` must be registered rather than
+hard-coded, and because feature 006's configurable copy shortcut will reuse the
+same registry for conflict validation. It contains no user-configurable state
+in this feature.
 
 ## Complexity Tracking
 

@@ -4,6 +4,7 @@ import { OVERSCAN, ROW_HEIGHT, visibleRange } from "./virtual-list";
 
 interface InboxBrowserOptions {
   onOpen(path: string): void;
+  onToggleBookmark?(path: string): void;
   now?: () => number;
   viewportHeight?: number;
 }
@@ -25,6 +26,7 @@ export class InboxBrowser {
   private entries: InboxEntry[] = [];
   private openPaths: ReadonlySet<string> = new Set();
   private activePath: string | null = null;
+  private bookmarkedPaths: ReadonlySet<string> = new Set();
   private emptyMessage = "No documents match the configured watches.";
 
   private readonly rendered = new Map<number, HTMLElement>();
@@ -49,9 +51,10 @@ export class InboxBrowser {
     openPaths: ReadonlySet<string>,
     activePath: string | null,
     emptyMessage = "No documents match the configured watches.",
+    bookmarkedPaths: ReadonlySet<string> = this.bookmarkedPaths,
   ): void {
     if (this.overlay === null) this.mount();
-    this.update(entries, openPaths, activePath, emptyMessage);
+    this.update(entries, openPaths, activePath, emptyMessage, bookmarkedPaths);
     document.addEventListener("keydown", this.onKeyDown);
     this.overlay?.querySelector<HTMLButtonElement>(".inbox-modal-close")?.focus();
   }
@@ -61,10 +64,12 @@ export class InboxBrowser {
     openPaths: ReadonlySet<string>,
     activePath: string | null,
     emptyMessage = this.emptyMessage,
+    bookmarkedPaths: ReadonlySet<string> = this.bookmarkedPaths,
   ): void {
     this.entries = entries;
     this.openPaths = openPaths;
     this.activePath = activePath;
+    this.bookmarkedPaths = bookmarkedPaths;
     this.emptyMessage = emptyMessage;
 
     if (this.list === null || this.countEl === null || this.emptyEl === null) {
@@ -81,6 +86,12 @@ export class InboxBrowser {
   }
 
   refresh(): void {
+    this.renderWindow(true);
+  }
+
+  /** Updates star state without reopening the modal. */
+  setBookmarkedPaths(paths: ReadonlySet<string>): void {
+    this.bookmarkedPaths = paths;
     this.renderWindow(true);
   }
 
@@ -164,11 +175,20 @@ export class InboxBrowser {
 
   private bindRowEvents(list: HTMLUListElement): void {
     const activate = (event: Event): void => {
-      const row = (event.target as Element | null)?.closest<HTMLElement>(
-        ".inbox-row",
-      );
+      const target = event.target as Element | null;
+      const row = target?.closest<HTMLElement>(".inbox-row");
       const path = row?.dataset.path;
       if (!path) return;
+
+      if (target?.closest(".inbox-bookmark")) {
+        this.options.onToggleBookmark?.(path);
+        return;
+      }
+
+      // Only the main control or row padding opens; other row actions do not.
+      const control = target?.closest<HTMLElement>("button, a");
+      if (control && !control.matches(".inbox-row-main")) return;
+
       this.close();
       this.options.onOpen(path);
     };
@@ -180,10 +200,9 @@ export class InboxBrowser {
         ".inbox-row",
       );
       const path = row?.dataset.path;
-      if (!path) return;
+      if (!path || event.target !== row) return;
       event.preventDefault();
-      this.close();
-      this.options.onOpen(path);
+      activate(event);
     });
   }
 
@@ -244,6 +263,7 @@ export class InboxBrowser {
           this.openPaths,
           this.activePath,
           this.options.now?.() ?? Date.now(),
+          this.bookmarkedPaths.has(this.entries[index].path),
         );
       }
     }

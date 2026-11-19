@@ -1,4 +1,10 @@
 import { InboxBrowser } from "./browse-modal";
+import type {
+  BookmarkDocumentView,
+  BookmarkRow,
+  BookmarkSectionView,
+  BookmarkView,
+} from "./bookmarks-view";
 import type { InboxEntry } from "./inbox-model";
 import type { SummaryStatus } from "./summary-model";
 import { bindInboxRow, createInboxRow } from "./sidebar-rows";
@@ -26,6 +32,12 @@ export interface SidebarViewState {
   summary: SummaryStatus;
   /** True while a summary request is in flight. */
   summaryBusy: boolean;
+  /** Composed Bookmarks rows for the current filter. */
+  bookmarks: BookmarkView;
+  /** Every document marker, independent of the active filter. */
+  bookmarkedPaths: ReadonlySet<string>;
+  /** Whether popups are limited to bookmarked documents. */
+  bookmarkNotificationsOnly: boolean;
   now: number;
 }
 
@@ -42,6 +54,14 @@ export interface SidebarPanelOptions {
   onModeChange(mode: BrowseMode): void;
   /** Called whenever the browse filter changes (including clear/Escape). */
   onFilterChange(term: string): void;
+  /** Toggles a document bookmark without opening or focusing it. */
+  onToggleDocumentBookmark(path: string): void;
+  /** Opens/focuses a document and scrolls to a section bookmark. */
+  onSectionActivate(section: BookmarkSectionView): void;
+  onSectionRemove(id: string): void;
+  onSectionReanchor(id: string): void;
+  /** Persists the bookmark-only notification preference. */
+  onBookmarkNotificationsChange(enabled: boolean): void;
   onToggleSection(section: "open" | "browse", collapsed: boolean): void;
   onContextMenu(
     path: string,
@@ -74,22 +94,32 @@ export class SidebarPanel {
   private readonly browseBody: HTMLDivElement;
   private readonly modeAll: HTMLButtonElement;
   private readonly modeRecent: HTMLButtonElement;
+  private readonly modeBookmarks: HTMLButtonElement;
+  private readonly modeBookmarksCount: HTMLSpanElement;
   private readonly clearBtn: HTMLButtonElement;
   private readonly undoBtn: HTMLButtonElement;
   private readonly summaryBtn: HTMLButtonElement;
   private readonly popoutBtn: HTMLButtonElement;
   private readonly filterInput: HTMLInputElement;
   private readonly filterClear: HTMLButtonElement;
+  private readonly filterCount: HTMLSpanElement;
   private readonly hintHost: HTMLDivElement;
   private readonly browseScroll: HTMLDivElement;
   private readonly browseList: HTMLUListElement;
   private readonly browseEmpty: HTMLParagraphElement;
+  private readonly bookmarksScroll: HTMLDivElement;
+  private readonly bookmarksList: HTMLUListElement;
+  private readonly bookmarksEmpty: HTMLParagraphElement;
+  private readonly bookmarksSettings: HTMLDivElement;
+  private readonly bookmarkNotifications: HTMLInputElement;
+  private readonly bookmarkNotificationsNote: HTMLParagraphElement;
 
   private readonly splitHost: HTMLDivElement;
   private splitPercent = 50;
   private browseVisible = true;
 
   private readonly virtual: VirtualList<InboxEntry>;
+  private readonly bookmarksVirtual: VirtualList<BookmarkRow>;
   private browser: InboxBrowser | null = null;
 
   constructor(
@@ -117,6 +147,15 @@ export class SidebarPanel {
         configPath: "",
       },
       summaryBusy: false,
+      bookmarks: {
+        rows: [],
+        documents: [],
+        documentCount: 0,
+        sectionCount: 0,
+        totalCount: 0,
+      },
+      bookmarkedPaths: new Set(),
+      bookmarkNotificationsOnly: false,
       now: Date.now(),
     };
 
@@ -178,7 +217,11 @@ export class SidebarPanel {
     modes.setAttribute("aria-label", "Browse mode");
     this.modeAll = this.modeButton("all", "All");
     this.modeRecent = this.modeButton("recent", "Recently changed");
-    modes.append(this.modeAll, this.modeRecent);
+    this.modeBookmarks = this.modeButton("bookmarks", "Bookmarks");
+    this.modeBookmarksCount = document.createElement("span");
+    this.modeBookmarksCount.className = "sidebar-mode-count";
+    this.modeBookmarks.append(this.modeBookmarksCount);
+    modes.append(this.modeAll, this.modeRecent, this.modeBookmarks);
 
     const actions = document.createElement("div");
     actions.className = "sidebar-browse-actions";
@@ -221,10 +264,38 @@ export class SidebarPanel {
     this.filterClear.setAttribute("aria-label", "Clear the document filter");
     this.filterClear.title = "Clear the filter";
     this.filterClear.hidden = true;
-    filterRow.append(filterLabel, this.filterInput, this.filterClear);
+    this.filterCount = document.createElement("span");
+    this.filterCount.id = "sidebar-filter-count";
+    this.filterCount.className = "visually-hidden";
+    filterRow.append(
+      filterLabel,
+      this.filterInput,
+      this.filterClear,
+      this.filterCount,
+    );
 
     this.hintHost = document.createElement("div");
     this.hintHost.className = "sidebar-hint-host";
+
+    this.bookmarksSettings = document.createElement("div");
+    this.bookmarksSettings.className = "sidebar-bookmarks-settings";
+    const settingRow = document.createElement("label");
+    settingRow.className = "sidebar-bookmark-setting";
+    this.bookmarkNotifications = document.createElement("input");
+    this.bookmarkNotifications.type = "checkbox";
+    this.bookmarkNotifications.className = "sidebar-bookmark-notifications";
+    this.bookmarkNotifications.id = "bookmark-notifications-only";
+    const settingLabel = document.createElement("span");
+    settingLabel.textContent = "Notify only for bookmarked documents";
+    settingRow.append(this.bookmarkNotifications, settingLabel);
+    this.bookmarkNotificationsNote = document.createElement("p");
+    this.bookmarkNotificationsNote.className = "sidebar-bookmark-setting-note";
+    this.bookmarkNotificationsNote.id = "bookmark-notifications-note";
+    this.bookmarkNotifications.setAttribute(
+      "aria-describedby",
+      "bookmark-notifications-note",
+    );
+    this.bookmarksSettings.append(settingRow, this.bookmarkNotificationsNote);
 
     this.browseScroll = document.createElement("div");
     this.browseScroll.className = "sidebar-browse-scroll";
@@ -232,13 +303,26 @@ export class SidebarPanel {
     this.browseList.className = "inbox-list inbox-list--virtual";
     this.browseEmpty = document.createElement("p");
     this.browseEmpty.className = "inbox-empty sidebar-browse-empty";
+
+    this.bookmarksScroll = document.createElement("div");
+    this.bookmarksScroll.className = "sidebar-bookmarks-scroll";
+    this.bookmarksList = document.createElement("ul");
+    this.bookmarksList.className =
+      "inbox-list inbox-list--virtual bookmark-list";
+    this.bookmarksEmpty = document.createElement("p");
+    this.bookmarksEmpty.className = "inbox-empty sidebar-bookmarks-empty";
+
     this.browseScroll.append(this.browseList);
+    this.bookmarksScroll.append(this.bookmarksList);
     this.browseBody.append(
       toolbar,
       filterRow,
+      this.bookmarksSettings,
       this.hintHost,
       this.browseScroll,
       this.browseEmpty,
+      this.bookmarksScroll,
+      this.bookmarksEmpty,
     );
 
     this.browseSection.append(this.browseHeader, this.browseBody);
@@ -271,10 +355,23 @@ export class SidebarPanel {
           this.state.openPaths,
           this.state.activePath,
           this.state.now,
+          this.state.bookmarkedPaths.has(entry.path),
         ),
       onActivate: (entry) => this.options.onOpen(entry.path),
       viewportHeight: options.viewportHeight,
     });
+
+    this.bookmarksVirtual = new VirtualList<BookmarkRow>(
+      this.bookmarksList,
+      this.bookmarksScroll,
+      {
+        createRow: () => document.createElement("li"),
+        bindRow: (row, item) => this.bindBookmarkRow(row, item),
+        rowSelector: ".inbox-row, .bookmark-section-row",
+        activationSelector: ".inbox-row-main, .bookmark-section-open",
+        viewportHeight: options.viewportHeight,
+      },
+    );
 
     this.bindEvents();
   }
@@ -284,6 +381,7 @@ export class SidebarPanel {
     this.renderOpenSection();
     this.renderBrowseSection();
     this.renderSplit();
+    this.browser?.setBookmarkedPaths(this.state.bookmarkedPaths);
   }
 
   /** The Open/Browse boundary, wired to a `LayoutResizer` by `main.ts`. */
@@ -301,6 +399,7 @@ export class SidebarPanel {
   /** Repaints after being shown or after a window resize. */
   refresh(): void {
     this.virtual.refresh();
+    this.bookmarksVirtual.refresh();
     this.browser?.refresh();
   }
 
@@ -313,6 +412,7 @@ export class SidebarPanel {
 
   destroy(): void {
     this.virtual.destroy();
+    this.bookmarksVirtual.destroy();
     this.browser?.destroy();
   }
 
@@ -352,6 +452,7 @@ export class SidebarPanel {
     this.openList.addEventListener("click", (event) => {
       const target = event.target as Element | null;
       const close = target?.closest<HTMLElement>(".sidebar-row-close");
+      const bookmark = target?.closest<HTMLElement>(".sidebar-row-bookmark");
       const row = target?.closest<HTMLElement>(".sidebar-row");
       const path = row?.dataset.path;
       if (!path) return;
@@ -360,6 +461,13 @@ export class SidebarPanel {
         this.options.onClose(path);
         return;
       }
+      if (bookmark) {
+        event.stopPropagation();
+        this.options.onToggleDocumentBookmark(path);
+        return;
+      }
+      const control = target?.closest<HTMLElement>("button, a");
+      if (control && !control.matches(".sidebar-row-main")) return;
       this.options.onOpen(path);
     });
 
@@ -374,16 +482,12 @@ export class SidebarPanel {
       this.options.onClose(path);
     });
 
-    this.openList.addEventListener("keydown", (event) => {      const row = (event.target as Element | null)?.closest<HTMLElement>(
+    this.openList.addEventListener("keydown", (event) => {
+      const row = (event.target as Element | null)?.closest<HTMLElement>(
         ".sidebar-row",
       );
       const path = row?.dataset.path;
-      if (!path || event.target !== row) return;
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        this.options.onOpen(path);
-        return;
-      }
+      if (!path) return;
       if (
         event.key === "ContextMenu" ||
         (event.shiftKey && event.key === "F10")
@@ -427,6 +531,19 @@ export class SidebarPanel {
         row,
       );
     };
+    this.browseList.addEventListener("click", (event) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".inbox-bookmark")) return;
+      const row = target.closest<HTMLElement>(".inbox-row");
+      const index = row ? Number(row.dataset.index) : NaN;
+      const item = Number.isInteger(index)
+        ? this.browseItems()[index]
+        : undefined;
+      if (item !== undefined) {
+        this.options.onToggleDocumentBookmark(item.path);
+      }
+    });
+
     this.browseList.addEventListener("auxclick", (event) => {
       if (event.button !== 1) return;
       const row = (event.target as Element | null)?.closest<HTMLElement>(
@@ -465,6 +582,80 @@ export class SidebarPanel {
       );
     });
 
+    this.bookmarksList.addEventListener("click", (event) => {
+      const target = event.target as Element | null;
+      const row = target?.closest<HTMLElement>(
+        ".inbox-row, .bookmark-section-row",
+      );
+      const item = this.bookmarkItem(row);
+      if (!row || item === undefined) return;
+
+      if (item.kind === "document") {
+        if (target?.closest(".inbox-bookmark")) {
+          this.options.onToggleDocumentBookmark(item.document.path);
+          return;
+        }
+        if (!item.document.available) return;
+        const control = target?.closest<HTMLElement>("button, a");
+        if (control && !control.matches(".inbox-row-main")) return;
+        this.options.onOpen(item.document.path);
+        return;
+      }
+
+      const action = target?.closest<HTMLElement>("[data-bookmark-action]");
+      if (action) {
+        if (action.dataset.bookmarkAction === "reanchor") {
+          this.options.onSectionReanchor(item.section.id);
+        } else {
+          this.options.onSectionRemove(item.section.id);
+        }
+        return;
+      }
+
+      const control = target?.closest<HTMLElement>("button, a");
+      if (control && !control.matches(".bookmark-section-open")) return;
+      this.options.onSectionActivate(item.section);
+    });
+
+    const bookmarkMenu = (
+      row: HTMLElement,
+      item: BookmarkRow,
+      anchor: { x: number; y: number } | { rect: DOMRect },
+    ): void => {
+      if (item.kind !== "document") return;
+      this.options.onContextMenu(item.document.path, anchor, row);
+    };
+    this.bookmarksList.addEventListener("contextmenu", (event) => {
+      const row = (event.target as Element | null)?.closest<HTMLElement>(
+        ".inbox-row",
+      );
+      const item = this.bookmarkItem(row);
+      if (!row || item === undefined) return;
+      event.preventDefault();
+      bookmarkMenu(row, item, { x: event.clientX, y: event.clientY });
+    });
+    this.bookmarksList.addEventListener("keydown", (event) => {
+      if (
+        event.key !== "ContextMenu" &&
+        !(event.shiftKey && event.key === "F10")
+      ) {
+        return;
+      }
+      const row = (event.target as Element | null)?.closest<HTMLElement>(
+        ".inbox-row",
+      );
+      const item = this.bookmarkItem(row);
+      if (!row || item === undefined) return;
+      event.preventDefault();
+      bookmarkMenu(row, item, { rect: row.getBoundingClientRect() });
+    });
+
+    this.bookmarkNotifications.addEventListener("change", () => {
+      this.options.onBookmarkNotificationsChange(
+        this.bookmarkNotifications.checked,
+      );
+    });
+
     this.filterInput.addEventListener("input", () => {
       this.options.onFilterChange(this.filterInput.value);
     });
@@ -492,6 +683,8 @@ export class SidebarPanel {
   private openPopout(): void {
     this.browser ??= new InboxBrowser({
       onOpen: (path) => this.options.onOpen(path),
+      onToggleBookmark: (path) =>
+        this.options.onToggleDocumentBookmark(path),
       now: this.options.now,
       viewportHeight: this.options.modalViewportHeight,
     });
@@ -505,6 +698,7 @@ export class SidebarPanel {
       this.state.openPaths,
       this.state.activePath,
       emptyMessage,
+      this.state.bookmarkedPaths,
     );
   }
 
@@ -537,8 +731,7 @@ export class SidebarPanel {
     const item = document.createElement("li");
     item.className = "sidebar-row";
     item.dataset.path = row.path;
-    item.tabIndex = 0;
-    item.setAttribute("role", "button");
+    item.tabIndex = -1;
     if (row.active) item.classList.add("active");
     if (row.unread) item.classList.add("unread");
     if (row.deleted) item.classList.add("deleted");
@@ -546,7 +739,12 @@ export class SidebarPanel {
       item.classList.add("active-update");
     }
     item.title = row.deleted ? `${row.path} (deleted on disk)` : row.path;
-    item.setAttribute("aria-current", row.active ? "true" : "false");
+
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "sidebar-row-main";
+    main.setAttribute("aria-current", row.active ? "true" : "false");
+    main.setAttribute("aria-label", row.filename);
 
     const dot = document.createElement("span");
     dot.className = "tab-dot";
@@ -554,28 +752,217 @@ export class SidebarPanel {
     const title = document.createElement("span");
     title.className = "sidebar-row-title";
     title.textContent = row.filename;
+    main.append(dot, title);
 
-    const close = document.createElement("span");
+    const bookmarked = this.state.bookmarkedPaths.has(row.path);
+    const bookmark = document.createElement("button");
+    bookmark.type = "button";
+    bookmark.className = "sidebar-row-bookmark";
+    bookmark.setAttribute("aria-pressed", String(bookmarked));
+    bookmark.setAttribute(
+      "aria-label",
+      bookmarked
+        ? `Remove bookmark for ${row.filename}`
+        : `Bookmark ${row.filename}`,
+    );
+    bookmark.title = bookmarked ? "Remove bookmark" : "Bookmark document";
+    bookmark.textContent = bookmarked ? "★" : "☆";
+
+    const close = document.createElement("button");
+    close.type = "button";
     close.className = "sidebar-row-close";
     close.textContent = "×";
-    close.setAttribute("role", "button");
     close.setAttribute("aria-label", `Close ${row.filename}`);
+    close.title = `Close ${row.filename}`;
 
-    item.append(dot, title, close);
+    item.append(main, bookmark, close);
     return item;
   }
 
   private browseItems(): InboxEntry[] {
+    if (this.state.browseMode === "bookmarks") return [];
     return this.state.browseMode === "recent"
       ? this.state.recent
       : this.state.inventory;
   }
 
+  private bookmarkItem(
+    row: HTMLElement | null | undefined,
+  ): BookmarkRow | undefined {
+    if (row === null || row === undefined) return undefined;
+    const index = Number(row.dataset.index);
+    if (!Number.isInteger(index)) return undefined;
+    return this.state.bookmarks.rows[index];
+  }
+
+  private bindBookmarkRow(row: HTMLElement, item: BookmarkRow): void {
+    if (item.kind === "document") {
+      this.renderBookmarkDocumentRow(row, item.document);
+      return;
+    }
+    this.renderBookmarkSectionRow(row, item.section);
+  }
+
+  private renderBookmarkDocumentRow(
+    row: HTMLElement,
+    documentView: BookmarkDocumentView,
+  ): void {
+    const built = createInboxRow();
+    row.className = built.className;
+    row.replaceChildren(...built.childNodes);
+    row.dataset.kind = "document";
+
+    bindInboxRow(
+      row,
+      {
+        path: documentView.path,
+        filename: documentView.filename,
+        modifiedTime: documentView.modifiedTime,
+        changedAt: 0,
+        unread: documentView.unread,
+        deleted: !documentView.available,
+        inventoryHidden: false,
+        origin: "manual",
+      },
+      this.state.openPaths,
+      this.state.activePath,
+      this.state.now,
+      documentView.documentBookmarked,
+    );
+
+    row.classList.add("bookmark-document");
+    if (!documentView.available) {
+      row.classList.add("unavailable");
+      const main = row.querySelector<HTMLButtonElement>(".inbox-row-main");
+      if (main) {
+        main.disabled = true;
+        main.setAttribute("aria-disabled", "true");
+      }
+      const time = row.querySelector<HTMLTimeElement>(".inbox-time");
+      if (time) {
+        time.textContent = "Unavailable";
+        time.removeAttribute("datetime");
+      }
+    }
+
+    if (documentView.sectionCount > 0) {
+      const top = row.querySelector<HTMLElement>(".inbox-row-top");
+      const count = document.createElement("span");
+      count.className = "bookmark-section-count";
+      count.textContent = String(documentView.sectionCount);
+      count.title = `${documentView.sectionCount} section bookmark${
+        documentView.sectionCount === 1 ? "" : "s"
+      }`;
+      top?.append(count);
+    }
+
+    if (!documentView.available) {
+      const top = row.querySelector<HTMLElement>(".inbox-row-top");
+      const badge = document.createElement("span");
+      badge.className = "bookmark-unavailable-badge";
+      badge.textContent = "Unavailable";
+      top?.append(badge);
+    }
+  }
+
+  private static readonly SECTION_STATUS_LABELS: Record<
+    BookmarkSectionView["status"],
+    string
+  > = {
+    unavailable: "Unavailable",
+    stale: "Not found",
+    unverified: "Not checked",
+    "re-anchored": "Moved",
+    shared: "Shared",
+    current: "",
+  };
+
+  private renderBookmarkSectionRow(
+    row: HTMLElement,
+    section: BookmarkSectionView,
+  ): void {
+    row.className = "bookmark-section-row";
+    row.dataset.kind = "section";
+    row.dataset.path = section.path;
+    row.dataset.sectionId = section.id;
+    row.style.setProperty("--bookmark-depth", String(section.depth));
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "bookmark-section-open";
+    open.setAttribute(
+      "aria-label",
+      `Open bookmark “${section.text}” in ${
+        section.path.split("/").pop() ?? section.path
+      }`,
+    );
+
+    const text = document.createElement("span");
+    text.className = "bookmark-section-text";
+    text.textContent = section.text.length > 0 ? section.text : "(untitled heading)";
+
+    const statusLabel = SidebarPanel.SECTION_STATUS_LABELS[section.status];
+    const status = document.createElement("span");
+    status.className = "bookmark-section-status";
+    status.textContent = statusLabel;
+    status.hidden = statusLabel.length === 0;
+    if (statusLabel.length > 0) {
+      status.classList.add(`status-${section.status}`);
+      if (section.status === "stale") {
+        status.title = "The heading this bookmark pointed at is no longer present.";
+      } else if (section.status === "unverified") {
+        status.title = "Open the document to check whether the heading still exists.";
+      } else if (section.status === "shared") {
+        status.title = "Another bookmark points at the same heading.";
+      } else if (section.status === "re-anchored") {
+        status.title = "The heading changed; the bookmark followed its context.";
+      }
+    }
+    open.append(text, status);
+    if (section.status === "unavailable") {
+      open.disabled = true;
+      open.setAttribute("aria-disabled", "true");
+    }
+
+    row.append(open);
+
+    if (section.status === "stale") {
+      const reanchor = document.createElement("button");
+      reanchor.type = "button";
+      reanchor.className = "bookmark-section-action";
+      reanchor.dataset.bookmarkAction = "reanchor";
+      reanchor.textContent = "Re-anchor";
+      reanchor.setAttribute(
+        "aria-label",
+        `Re-anchor bookmark “${section.text}” in ${
+          section.path.split("/").pop() ?? section.path
+        }`,
+      );
+      row.append(reanchor);
+    }
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "bookmark-section-action";
+    remove.dataset.bookmarkAction = "remove";
+    remove.textContent = "Remove";
+    remove.setAttribute(
+      "aria-label",
+      `Remove bookmark “${section.text}” from ${
+        section.path.split("/").pop() ?? section.path
+      }`,
+    );
+    row.append(remove);
+  }
+
   private renderBrowseSection(): void {
     const isRecent = this.state.browseMode === "recent";
+    const isBookmarks = this.state.browseMode === "bookmarks";
     const items = this.browseItems();
 
-    this.browseCount.textContent = String(items.length);
+    this.browseCount.textContent = String(
+      isBookmarks ? this.state.bookmarks.totalCount : items.length,
+    );
     this.browseHeader.setAttribute(
       "aria-expanded",
       String(!this.state.browseCollapsed),
@@ -583,20 +970,39 @@ export class SidebarPanel {
     this.browseSection.classList.toggle("collapsed", this.state.browseCollapsed);
     this.browseBody.hidden = this.state.browseCollapsed;
 
-    this.modeAll.classList.toggle("active", !isRecent);
+    this.modeAll.classList.toggle("active", !isRecent && !isBookmarks);
     this.modeRecent.classList.toggle("active", isRecent);
-    this.modeAll.setAttribute("aria-pressed", String(!isRecent));
+    this.modeBookmarks.classList.toggle("active", isBookmarks);
+    this.modeAll.setAttribute("aria-pressed", String(!isRecent && !isBookmarks));
     this.modeRecent.setAttribute("aria-pressed", String(isRecent));
+    this.modeBookmarks.setAttribute("aria-pressed", String(isBookmarks));
+    this.modeBookmarksCount.textContent = String(this.state.bookmarks.totalCount);
+    const total = this.state.bookmarks.totalCount;
+    this.modeBookmarks.setAttribute(
+      "aria-label",
+      `Bookmarks, ${total} bookmark${total === 1 ? "" : "s"}`,
+    );
 
     if (this.filterInput.value !== this.state.filterTerm) {
       this.filterInput.value = this.state.filterTerm;
     }
+    this.filterInput.placeholder = isBookmarks
+      ? "Filter bookmarks by document or heading"
+      : "Filter by name, folder or project";
     this.filterClear.hidden = this.state.filterTerm.trim().length === 0;
     this.filterInput.setAttribute(
       "aria-describedby",
       this.state.filterTerm.trim().length === 0 ? "" : "sidebar-filter-count",
     );
+    this.filterCount.textContent =
+      this.state.filterTerm.trim().length === 0
+        ? ""
+        : `${isBookmarks ? this.state.bookmarks.rows.length : items.length} matching`;
 
+    this.clearBtn.hidden = isBookmarks;
+    this.undoBtn.hidden = isBookmarks;
+    this.summaryBtn.hidden = isBookmarks;
+    this.popoutBtn.hidden = isBookmarks;
     this.clearBtn.disabled = !isRecent || this.state.recent.length === 0;
     this.undoBtn.disabled = !this.state.canUndo;
     this.summaryBtn.disabled =
@@ -607,9 +1013,73 @@ export class SidebarPanel {
     this.summaryBtn.title = this.summaryTitle();
     this.popoutBtn.disabled = this.state.inventory.length === 0;
 
+    this.bookmarksSettings.hidden = !isBookmarks;
+    this.bookmarkNotifications.checked =
+      this.state.bookmarkNotificationsOnly;
+    this.bookmarkNotificationsNote.textContent =
+      this.state.bookmarks.totalCount === 0
+        ? "No bookmarks yet, so no change notifications will appear."
+        : "Popups are limited to bookmarked documents. The tray dot still reflects every change.";
+
+    this.browseScroll.hidden = isBookmarks;
+    this.bookmarksScroll.hidden = !isBookmarks;
+    this.hintHost.hidden = isBookmarks;
+
     this.renderHint();
-    this.renderBrowseEmpty(items);
-    this.virtual.setItems(this.state.browseCollapsed ? [] : items);
+    if (!isBookmarks) this.renderBrowseEmpty(items);
+    else this.browseEmpty.hidden = true;
+    this.renderBookmarksEmpty();
+    this.virtual.setItems(
+      this.state.browseCollapsed || isBookmarks ? [] : items,
+    );
+    this.bookmarksVirtual.setItems(
+      isBookmarks && !this.state.browseCollapsed
+        ? this.state.bookmarks.rows
+        : [],
+    );
+  }
+
+  private renderBookmarksEmpty(): void {
+    if (this.state.browseMode !== "bookmarks") {
+      this.bookmarksEmpty.hidden = true;
+      return;
+    }
+
+    if (this.state.bookmarks.rows.length > 0 || this.state.browseCollapsed) {
+      this.bookmarksEmpty.hidden = true;
+      return;
+    }
+
+    this.bookmarksEmpty.hidden = false;
+    this.bookmarksEmpty.replaceChildren();
+    const term = this.state.filterTerm.trim();
+
+    if (term.length > 0) {
+      const text = document.createElement("span");
+      text.textContent = `No bookmarks match “${term}”.`;
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "sidebar-inline-action";
+      clear.textContent = "Clear filter";
+      clear.addEventListener("click", () => {
+        this.filterInput.value = "";
+        this.options.onFilterChange("");
+      });
+      this.bookmarksEmpty.append(text, clear);
+      return;
+    }
+
+    const text = document.createElement("span");
+    text.textContent =
+      "No bookmarks yet. Use the star on a document or heading, the header bookmark button, or Ctrl/Cmd+D.";
+    const browseAll = document.createElement("button");
+    browseAll.type = "button";
+    browseAll.className = "sidebar-inline-action";
+    browseAll.textContent = "Browse all documents";
+    browseAll.addEventListener("click", () =>
+      this.options.onModeChange("all"),
+    );
+    this.bookmarksEmpty.append(text, browseAll);
   }
 
   private renderSplit(): void {

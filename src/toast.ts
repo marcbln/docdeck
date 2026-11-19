@@ -1,5 +1,11 @@
 export type ToastTone = "info" | "error";
 
+/** Optional inline action, used for bookmark undo. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 /** How long a toast stays visible before it starts fading out, in ms. */
 const TOAST_DURATION_MS = 2000;
 
@@ -13,15 +19,42 @@ const TOAST_DURATION_MS = 2000;
 export class ToastHost {
   private el: HTMLDivElement | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private action: ToastAction | null = null;
 
   constructor(
     private readonly host: HTMLElement = document.body,
     private readonly durationMs: number = TOAST_DURATION_MS,
   ) {}
 
-  public show(message: string, tone: ToastTone = "info"): void {
+  public show(
+    message: string,
+    tone: ToastTone = "info",
+    action: ToastAction | null = null,
+  ): void {
     const el = this.ensureElement();
-    el.textContent = message;
+    this.action = action;
+
+    const text = document.createElement("span");
+    text.className = "toast-message";
+    text.textContent = message;
+
+    el.replaceChildren(text);
+    if (action !== null) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "toast-action";
+      button.textContent = action.label;
+      button.addEventListener("click", () => {
+        if (this.action === null) return;
+        if (!el.classList.contains("toast-visible")) return;
+        const callback = this.action.onClick;
+        this.action = null;
+        button.disabled = true;
+        this.dismiss();
+        callback();
+      });
+      el.append(button);
+    }
     el.classList.toggle("toast-error", tone === "error");
 
     // Remove and re-add in the same frame so a replacement message replays the
