@@ -2,6 +2,10 @@
 
 Guidelines for AI agents working in this repository.
 
+## Read first
+
+- [`_ai/goals.md`](_ai/goals.md) — what docdeck is for, its primary goals and non-goals.
+
 <!-- ruleman:conventions:begin -->
 ## Project conventions
 
