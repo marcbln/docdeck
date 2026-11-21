@@ -128,6 +128,12 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   **All**/**Warnings** filter and **Clear**, follows new entries without moving
   a paused scroll position, and closes on `Escape`. The log is session-only and
   capped at the 500 most recent entries.
+- **Keyboard help and bundled manual** — press `?` (or use the header's
+  **? Help** button) for a grouped shortcut reference and a Manual tab that
+  explains opening documents, live reload, views, bookmarks, clipboard actions
+  and configuration. The shortcut list is generated from the application's
+  registry, so it cannot drift from the shortcuts that actually work. `Ctrl+W`
+  closes the active document and leaves the app open; `Ctrl+Shift+T` reopens it.
 - **Resizable panes** — drag the sidebar width, outline width, event-log height
   or the Open/Browse split; double-click a boundary to restore its default, or
   focus it and use the arrow keys, `Home`/`End`, `Enter`/`Space`. Sizes persist
@@ -235,6 +241,12 @@ docdeck ./reports/agent_status.md
 # Add a folder to this session's watches
 docdeck ./_ai
 ```
+
+## Help
+
+Press `?` anywhere outside a text field, or use the **? Help** header button, to
+open the shortcut reference and manual inside the app. The same manual is
+available as [docs/manual.md](docs/manual.md) for reading outside docdeck.
 
 ## Watching folders on every launch
 

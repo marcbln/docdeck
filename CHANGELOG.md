@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Keyboard help and bundled manual**: `?` (or the new **? Help** header
+  button) opens a grouped shortcut reference and a Manual tab rendered from
+  `docs/manual.md`. The reference is generated from the application's shortcut
+  registry, so every registered chord appears and display labels stay
+  consistent. Help closes on `Esc`, a backdrop click or its close control, and
+  reopens on the Shortcuts tab.
+- **Close the active document with `Ctrl+W`**: paired with the existing
+  `Ctrl+Shift+T`, the document leaves the open list and remains available to
+  undo. `Ctrl+W` never closes the window and is ignored while a modal dialog is
+  open. It is Ctrl-only on every platform, so macOS `Cmd+W` stays the OS window
+  action.
 - **Document and section bookmarks**: star a whole document from the header,
   any navigation row, the row context menu, or `Ctrl`/`Cmd`+`D`; star an outline
   heading from its new control. A third **Bookmarks** browse mode lists them

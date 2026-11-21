@@ -1783,6 +1783,176 @@ body {
   overflow-y: auto;
 }
 
+/* Help dialog — shortcut reference and the bundled manual. */
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.6);
+}
+
+.help-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  height: min(82vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-secondary);
+}
+
+.help-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.help-title {
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.help-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-close:hover,
+.help-close:focus-visible {
+  color: var(--accent-color);
+}
+
+.help-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.help-tab {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  background-color: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.help-tab:hover,
+.help-tab:focus-visible {
+  color: var(--text-primary);
+}
+
+.help-tab.active {
+  border-color: var(--border-color);
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 22px;
+}
+
+.help-intro {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.help-group + .help-group {
+  margin-top: 18px;
+}
+
+.help-group-title {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.help-shortcuts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-shortcut {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.help-shortcut:last-child {
+  border-bottom: none;
+}
+
+.help-keys {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 142px;
+}
+
+.help-keys kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.help-key-separator {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.help-description {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.help-manual.markdown-body {
+  padding: 0;
+}
+
+.help-error {
+  margin: 8px 0 0;
+  color: var(--danger-color);
+  font-size: 12px;
+}
+
 /* Re-anchor picker. */
 .bookmark-picker {
   width: min(560px, 100%);

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import manualMarkdown from "../docs/manual.md?raw";
 import { Acknowledgements } from "./acknowledgements";
 import {
   captureAnchor,
@@ -79,6 +80,7 @@ import {
 } from "./shortcuts";
 import { StatusBar } from "./status-bar";
 import { deriveStatusBar } from "./status-view";
+import { ShortcutsModal } from "./shortcuts-modal";
 import { adjacentTabPath, tabCycleDirection, type TabCycleDirection } from "./tab-cycle";
 import { TabContextMenu } from "./tab-menu";
 import { createToggleButton } from "./toolbar";
@@ -197,6 +199,7 @@ class AppState {
   private readonly tocPanel: TocPanel;
   private readonly find: FindController;
   private readonly tabMenu: TabContextMenu;
+  private readonly help: ShortcutsModal;
   private readonly toast = new ToastHost();
   private readonly metadata: MetadataView;
   private readonly theme: ThemeController;
@@ -340,6 +343,8 @@ class AppState {
         toggle: (path) => this.toggleDocumentBookmark(path),
       },
     );
+
+    this.help = new ShortcutsModal({ manualMarkdown });
 
     // Expanding or folding the metadata table changes which text is visible.
     // `toggle` does not bubble, so listen in the capture phase.
@@ -609,6 +614,10 @@ class AppState {
     const watchesBtn = document.getElementById("toggle-watches-btn");
     watchesBtn?.addEventListener("click", () => void this.openConfigPanel());
 
+    document
+      .getElementById("toggle-help-btn")
+      ?.addEventListener("click", () => void this.help.open());
+
     this.bookmarkToggleBtn.addEventListener("click", () =>
       this.toggleActiveBookmark(),
     );
@@ -843,6 +852,7 @@ class AppState {
   /** Browser-style tab shortcuts: Ctrl+Shift+T reopens, Ctrl+Tab cycles. */
   private bindShortcuts(): void {
     const bookmarkShortcut = shortcutById("toggle-bookmark");
+    const closeShortcut = shortcutById("close-tab");
     window.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
 
@@ -853,6 +863,33 @@ class AppState {
         if (isTypingTarget(event.target) || isModalOpen()) return;
         event.preventDefault();
         this.toggleActiveBookmark();
+        return;
+      }
+
+      if (
+        closeShortcut !== undefined &&
+        matchesShortcut(event, closeShortcut)
+      ) {
+        // A dialog owns the keyboard while it is open; never close the
+        // document behind the reader's back.
+        if (isModalOpen()) return;
+        event.preventDefault();
+        if (this.activePath !== null) {
+          const path = this.activePath;
+          void this.closeTabPath(path);
+        }
+        return;
+      }
+
+      if (
+        event.key === "?" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        if (isTypingTarget(event.target) || isModalOpen()) return;
+        event.preventDefault();
+        void this.help.open();
         return;
       }
 

@@ -43,6 +43,17 @@ describe("shortcut registry", () => {
     expect(formatShortcutHint(reopen, "other")).toBe("(Ctrl+Shift+T)");
   });
 
+  it("keeps the close shortcut Ctrl-only on every platform", () => {
+    const close = shortcutById("close-tab")!;
+    expect(formatShortcut(close, "other")).toBe("Ctrl+W");
+    expect(formatShortcut(close, "mac")).toBe("Ctrl+W");
+    expect(matchesShortcut(key("w", { ctrlKey: true }), close)).toBe(true);
+    expect(matchesShortcut(key("w", { metaKey: true }), close)).toBe(false);
+    expect(
+      matchesShortcut(key("w", { ctrlKey: true, shiftKey: true }), close),
+    ).toBe(false);
+  });
+
   it("detects macOS from the user agent", () => {
     expect(shortcutPlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X)")).toBe(
       "mac",

@@ -33,6 +33,8 @@ export const FIXED_SHORTCUTS: readonly ShortcutDefinition[] = Object.freeze([
   { id: "toggle-bookmark", key: "d", modifier: "ctrlOrCmd", shift: false },
   { id: "next-tab", key: "Tab", modifier: "ctrl", shift: false },
   { id: "previous-tab", key: "Tab", modifier: "ctrl", shift: true },
+  // Ctrl-only on every platform: Cmd+W stays the macOS window action.
+  { id: "close-tab", key: "w", modifier: "ctrl", shift: false },
   { id: "reopen-tab", key: "t", modifier: "ctrlOrCmd", shift: true },
   { id: "toggle-log", key: "`", modifier: "ctrlOrCmd", shift: false },
   { id: "find", key: "f", modifier: "ctrlOrCmd", shift: false },
