@@ -13,6 +13,11 @@ import { BookmarksController } from "./bookmarks-controller";
 import { removedBookmarkLabel } from "./bookmarks-model";
 import { buildBookmarkView, type BookmarkSectionView } from "./bookmarks-view";
 import { BookmarkPicker } from "./bookmark-picker";
+import {
+  ChangedAiController,
+  type ChangedScopeState,
+} from "./changed-ai-controller";
+import type { ChangedAiReport } from "./changed-ai-model";
 import { ClosedTabs, isReopenClosedTabShortcut } from "./closed-tabs";
 import {
   type SaveOutcome,
@@ -52,6 +57,7 @@ import {
   selectRecent,
   snapshotRecent,
   type BrowseMode,
+  type BrowseView,
   type ClearSnapshot,
 } from "./sidebar-model";
 import { classifyLink, isMarkdownPath, type ResolvedLink } from "./links";
@@ -252,6 +258,7 @@ class AppState {
   private clearSnapshot: ClearSnapshot | null = null;
   private readonly sidebarEl = must<HTMLElement>("sidebar");
   private readonly sidebarPanel: SidebarPanel;
+  private readonly changedAi: ChangedAiController;
   private readonly appRoot = must<HTMLElement>("app");
   private readonly eventLog = new EventLog();
   private readonly statusBar: StatusBar;
@@ -377,6 +384,12 @@ class AppState {
         this.filterTerm = term;
         this.renderSidebar();
       },
+      onChangedActivate: (row) => {
+        if (this.tabs.has(row.path)) void this.setActiveTab(row.path);
+        else void this.openDocument(row.path);
+      },
+      onRefreshChanged: () => void this.changedAi.refresh(),
+      onShowAllChanged: () => void this.changedAi.showAllRepositories(),
       onToggleDocumentBookmark: (path) =>
         this.toggleDocumentBookmark(path),
       onSectionActivate: (section) => this.activateSection(section),
@@ -398,6 +411,13 @@ class AppState {
         if (this.tabMenu.isOpen) return;
         this.tabMenu.open(path, anchor, target);
       },
+    });
+
+    this.changedAi = new ChangedAiController({
+      load: (scope) =>
+        invoke<ChangedAiReport>("list_changed_ai_documents", { scope }),
+      now: () => Date.now(),
+      onChange: () => this.renderSidebar(),
     });
 
     this.statusBar = new StatusBar(must<HTMLElement>("status-bar"), {
@@ -551,6 +571,14 @@ class AppState {
     );
   }
 
+  /**
+   * One automatic changed-view refresh when the startup scans settle. The
+   * controller arms it only if the view activated while a scan was in flight.
+   */
+  private noteScanSettled(): void {
+    if (this.scansInFlight === 0) void this.changedAi.notifyWatchesSettled();
+  }
+
   private recordEvent(input: EventLogInput): void {
     this.eventLog.record(input);
     this.renderStatus();
@@ -603,9 +631,26 @@ class AppState {
       // is scanned, or the two sources would disagree about what is noise.
       await this.loadWatchConfig();
       if (folders.length > 0) await this.addWatch(folders);
+
+      // `docdeck --changed [path]` activates the transient view after the
+      // startup documents are open and the watch set is known.
+      const changedScope = await invoke<string | null>("startup_changed_scope");
+      if (changedScope !== null) {
+        this.activateChangedScope({
+          kind: "repository",
+          requestedPath: changedScope,
+          root: null,
+        });
+      }
     } catch (error) {
       console.error("Failed to read startup paths", error);
     }
+  }
+
+  /** Activates the changed view without writing preferences. */
+  private activateChangedScope(scope?: ChangedScopeState): void {
+    void this.changedAi.activate(scope, this.scansInFlight > 0);
+    this.renderSidebar();
   }
 
   // -- wiring ---------------------------------------------------------------
@@ -881,6 +926,19 @@ class AppState {
         return;
       }
 
+      const refreshChanged = shortcutById("refresh-changed");
+      if (
+        refreshChanged !== undefined &&
+        matchesShortcut(event, refreshChanged)
+      ) {
+        if (isTypingTarget(event.target) || isModalOpen()) return;
+        event.preventDefault();
+        if (this.changedAi.current.active) void this.changedAi.refresh();
+        else
+          void this.changedAi.activate(undefined, this.scansInFlight > 0);
+        return;
+      }
+
       if (
         event.key === "?" &&
         !event.ctrlKey &&
@@ -1016,6 +1074,19 @@ class AppState {
       await listen<CliEntry>("open-path-cli", (event) => {
         if (event.payload.is_dir) void this.addWatch([event.payload.path]);
         else void this.openDocument(event.payload.path);
+      });
+
+      // A second `docdeck --changed [path]` rescopes the running window. It
+      // never opens a document merely because the view was rescoped.
+      await listen<{ path: string | null }>("changed-ai-cli", (event) => {
+        const path = event.payload.path;
+        if (path === null) this.activateChangedScope();
+        else
+          this.activateChangedScope({
+            kind: "repository",
+            requestedPath: path,
+            root: null,
+          });
       });
 
       // A batch of settled writes from the debounced inotify watcher.
@@ -1578,6 +1649,7 @@ class AppState {
     } finally {
       this.scansInFlight -= 1;
       this.renderStatus();
+      this.noteScanSettled();
     }
     this.renderSidebar();
     void this.refreshSummaryStatus();
@@ -1629,6 +1701,7 @@ class AppState {
       this.scansInFlight -= 1;
       if (this.scansInFlight === 0) this.inboxStatus.progress = null;
       this.renderStatus();
+      this.noteScanSettled();
     }
     this.renderSidebar();
   }
@@ -1636,6 +1709,7 @@ class AppState {
   private renderSidebar(): void {
     const entries = this.inbox.entriesSorted();
     const inventory = entries.filter((entry) => !entry.inventoryHidden);
+    const changed = this.changedAi.snapshot;
     const bookmarks = buildBookmarkView({
       collection: this.bookmarks.snapshot,
       inventory,
@@ -1649,9 +1723,13 @@ class AppState {
         this.activePath,
         this.autoSort,
       ),
-      browseMode: this.preferences.browseMode,
+      browseMode: this.changedAi.current.active
+        ? "changed"
+        : this.preferences.browseMode,
       inventory: filterEntries(inventory, this.filterTerm),
       recent: filterEntries(selectRecent(entries, this.clearedAt), this.filterTerm),
+      changed,
+      changedRows: filterEntries(changed.rows, this.filterTerm),
       openPaths: new Set(this.tabs.keys()),
       activePath: this.activePath,
       activeUpdatePath: this.activeUpdatePath,
@@ -1894,8 +1972,19 @@ class AppState {
     });
   }
 
-  private setBrowseMode(mode: BrowseMode): void {
-    if (this.preferences.browseMode === mode) return;
+  private setBrowseMode(mode: BrowseView): void {
+    if (mode === "changed") {
+      // Transient: never writes preferences and never opens a document.
+      void this.changedAi.activate(undefined, this.scansInFlight > 0);
+      this.renderSidebar();
+      return;
+    }
+
+    this.changedAi.deactivate();
+    if (this.preferences.browseMode === mode) {
+      this.renderSidebar();
+      return;
+    }
     this.preferences.browseMode = mode;
     this.persist();
     this.renderSidebar();

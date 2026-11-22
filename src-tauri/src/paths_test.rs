@@ -3,7 +3,7 @@ mod tests {
     use crate::paths::{
         classify_args, classify_args_with_warnings, expand_tilde, has_ignored_component_below,
         is_ignored_name, is_markdown, is_noise_name, is_relevant, is_under, modified_millis,
-        resolve_link, ExcludeSet,
+        parse_cli, resolve_link, ExcludeSet,
     };
     use std::collections::HashSet;
     use std::fs;
@@ -307,5 +307,133 @@ mod tests {
             entries[0].path,
             file.canonicalize().unwrap().to_string_lossy().into_owned()
         );
+    }
+
+    fn canonical_text(path: &Path) -> String {
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn changed_flag_defaults_to_the_caller_cwd() {
+        let dir = tempdir().unwrap();
+        let request = parse_cli(&["docdeck".to_string(), "--changed".to_string()], dir.path());
+
+        assert_eq!(request.changed.as_deref(), Some(canonical_text(dir.path()).as_str()));
+        assert!(request.entries.is_empty());
+        assert!(request.warnings.is_empty());
+    }
+
+    #[test]
+    fn changed_flag_consumes_one_scope_and_never_opens_it() {
+        let dir = tempdir().unwrap();
+        let alpha = dir.path().join("alpha");
+        let beta = dir.path().join("beta");
+        fs::create_dir_all(&alpha).unwrap();
+        fs::create_dir_all(&beta).unwrap();
+
+        let request = parse_cli(
+            &[
+                "docdeck".to_string(),
+                "--changed".to_string(),
+                alpha.to_string_lossy().into_owned(),
+                beta.to_string_lossy().into_owned(),
+            ],
+            dir.path(),
+        );
+
+        assert_eq!(
+            request.changed.as_deref(),
+            Some(canonical_text(&alpha).as_str())
+        );
+        assert_eq!(request.entries.len(), 1);
+        assert_eq!(request.entries[0].path, canonical_text(&beta));
+        assert!(!request
+            .entries
+            .iter()
+            .any(|entry| entry.path == canonical_text(&alpha)));
+    }
+
+    #[test]
+    fn changed_equals_form_and_relative_scope_resolve_against_cwd() {
+        let dir = tempdir().unwrap();
+        let alpha = dir.path().join("alpha");
+        fs::create_dir_all(&alpha).unwrap();
+
+        let request = parse_cli(
+            &["docdeck".to_string(), "--changed=alpha".to_string()],
+            dir.path(),
+        );
+        assert_eq!(
+            request.changed.as_deref(),
+            Some(canonical_text(&alpha).as_str())
+        );
+        assert!(request.entries.is_empty());
+    }
+
+    #[test]
+    fn the_last_changed_flag_wins() {
+        let dir = tempdir().unwrap();
+        let alpha = dir.path().join("alpha");
+        let beta = dir.path().join("beta");
+        fs::create_dir_all(&alpha).unwrap();
+        fs::create_dir_all(&beta).unwrap();
+
+        let request = parse_cli(
+            &[
+                "docdeck".to_string(),
+                "--changed".to_string(),
+                alpha.to_string_lossy().into_owned(),
+                format!("--changed={}", beta.to_string_lossy()),
+            ],
+            dir.path(),
+        );
+
+        assert_eq!(
+            request.changed.as_deref(),
+            Some(canonical_text(&beta).as_str())
+        );
+    }
+
+    #[test]
+    fn changed_before_quit_leaves_no_scope_and_quit_keeps_precedence() {
+        let dir = tempdir().unwrap();
+        let request = parse_cli(
+            &[
+                "docdeck".to_string(),
+                "--changed".to_string(),
+                "--quit".to_string(),
+            ],
+            dir.path(),
+        );
+
+        assert!(request.changed.is_none());
+        assert!(request.entries.is_empty());
+    }
+
+    #[test]
+    fn an_unresolvable_scope_is_forwarded_with_a_warning() {
+        let dir = tempdir().unwrap();
+        let request = parse_cli(
+            &[
+                "docdeck".to_string(),
+                "--changed".to_string(),
+                "missing-folder".to_string(),
+            ],
+            dir.path(),
+        );
+
+        let expected = dir.path().join("missing-folder");
+        assert_eq!(
+            request.changed.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+        assert_eq!(request.warnings.len(), 1);
+        assert!(request.warnings[0].contains("changed scope"));
+        assert!(request.warnings[0].contains("missing-folder"));
+        // A failed scope is still not opened as a document or folder.
+        assert!(request.entries.is_empty());
     }
 }

@@ -5,16 +5,28 @@ import type {
   BookmarkSectionView,
   BookmarkView,
 } from "./bookmarks-view";
+import type {
+  ChangedRow,
+  ChangedViewState,
+} from "./changed-ai-model";
+import {
+  bindChangedRow,
+  createChangedRow,
+  createRepositoryErrorBanner,
+  createScopeBanner,
+  createStatePanel,
+} from "./changed-ai-rows";
 import type { InboxEntry } from "./inbox-model";
 import type { SummaryStatus } from "./summary-model";
 import { bindInboxRow, createInboxRow } from "./sidebar-rows";
-import type { BrowseMode, OpenRow } from "./sidebar-model";
+import type { BrowseMode, BrowseView, OpenRow } from "./sidebar-model";
 import { VirtualList } from "./virtual-list";
 
 /** Everything the sidebar needs for one paint. */
 export interface SidebarViewState {
   openRows: OpenRow[];
-  browseMode: BrowseMode;
+  /** `"changed"` is transient and never persisted. */
+  browseMode: BrowseView;
   inventory: InboxEntry[];
   recent: InboxEntry[];
   openPaths: ReadonlySet<string>;
@@ -38,6 +50,10 @@ export interface SidebarViewState {
   bookmarkedPaths: ReadonlySet<string>;
   /** Whether popups are limited to bookmarked documents. */
   bookmarkNotificationsOnly: boolean;
+  /** The changed-view snapshot; its `rows` are unfiltered. */
+  changed: ChangedViewState;
+  /** Rows after the shared filter, in model order. */
+  changedRows: ChangedRow[];
   now: number;
 }
 
@@ -51,9 +67,15 @@ export interface SidebarPanelOptions {
   onClear(): void;
   onUndo(): void;
   onSummarize(): void;
-  onModeChange(mode: BrowseMode): void;
+  onModeChange(mode: BrowseView): void;
   /** Called whenever the browse filter changes (including clear/Escape). */
   onFilterChange(term: string): void;
+  /** Opens or focuses one changed document; never bulk-opens. */
+  onChangedActivate(row: ChangedRow): void;
+  /** Re-reads git for the changed view. */
+  onRefreshChanged(): void;
+  /** Returns a scoped changed view to every watched repository. */
+  onShowAllChanged(): void;
   /** Toggles a document bookmark without opening or focusing it. */
   onToggleDocumentBookmark(path: string): void;
   /** Opens/focuses a document and scrolls to a section bookmark. */
@@ -95,6 +117,7 @@ export class SidebarPanel {
   private readonly modeAll: HTMLButtonElement;
   private readonly modeRecent: HTMLButtonElement;
   private readonly modeBookmarks: HTMLButtonElement;
+  private readonly modeChanged: HTMLButtonElement;
   private readonly modeBookmarksCount: HTMLSpanElement;
   private readonly clearBtn: HTMLButtonElement;
   private readonly undoBtn: HTMLButtonElement;
@@ -114,12 +137,22 @@ export class SidebarPanel {
   private readonly bookmarkNotifications: HTMLInputElement;
   private readonly bookmarkNotificationsNote: HTMLParagraphElement;
 
+  private readonly changedToolbar: HTMLDivElement;
+  private readonly changedRefreshBtn: HTMLButtonElement;
+  private readonly changedScopeHost: HTMLDivElement;
+  private readonly changedErrorHost: HTMLDivElement;
+  private readonly changedStateHost: HTMLDivElement;
+  private readonly changedScroll: HTMLDivElement;
+  private readonly changedList: HTMLUListElement;
+  private readonly changedEmpty: HTMLParagraphElement;
+
   private readonly splitHost: HTMLDivElement;
   private splitPercent = 50;
   private browseVisible = true;
 
   private readonly virtual: VirtualList<InboxEntry>;
   private readonly bookmarksVirtual: VirtualList<BookmarkRow>;
+  private readonly changedVirtual: VirtualList<ChangedRow>;
   private browser: InboxBrowser | null = null;
 
   constructor(
@@ -156,6 +189,19 @@ export class SidebarPanel {
       },
       bookmarkedPaths: new Set(),
       bookmarkNotificationsOnly: false,
+      changed: {
+        status: "idle",
+        rows: [],
+        repositories: [],
+        scope: null,
+        scopeError: null,
+        gitAvailable: true,
+        discoveryTruncated: false,
+        watchedRoots: 0,
+        aiFolders: 0,
+        loadedAt: null,
+      },
+      changedRows: [],
       now: Date.now(),
     };
 
@@ -221,7 +267,14 @@ export class SidebarPanel {
     this.modeBookmarksCount = document.createElement("span");
     this.modeBookmarksCount.className = "sidebar-mode-count";
     this.modeBookmarks.append(this.modeBookmarksCount);
-    modes.append(this.modeAll, this.modeRecent, this.modeBookmarks);
+    this.modeChanged = this.modeButton("changed", "Changed `_ai`");
+    this.modeChanged.setAttribute("aria-label", "Changed `_ai` documents");
+    modes.append(
+      this.modeAll,
+      this.modeRecent,
+      this.modeBookmarks,
+      this.modeChanged,
+    );
 
     const actions = document.createElement("div");
     actions.className = "sidebar-browse-actions";
@@ -277,6 +330,27 @@ export class SidebarPanel {
     this.hintHost = document.createElement("div");
     this.hintHost.className = "sidebar-hint-host";
 
+    this.changedToolbar = document.createElement("div");
+    this.changedToolbar.className = "sidebar-changed-toolbar";
+    this.changedRefreshBtn = this.actionButton(
+      "⟳ Refresh",
+      "Refresh changed `_ai` documents",
+      "refresh-changed",
+    );
+    this.changedRefreshBtn.setAttribute(
+      "aria-label",
+      "Refresh changed `_ai` documents",
+    );
+    this.changedToolbar.append(this.changedRefreshBtn);
+    this.changedToolbar.hidden = true;
+
+    this.changedScopeHost = document.createElement("div");
+    this.changedScopeHost.className = "sidebar-changed-scope-host";
+    this.changedErrorHost = document.createElement("div");
+    this.changedErrorHost.className = "sidebar-changed-error-host";
+    this.changedStateHost = document.createElement("div");
+    this.changedStateHost.className = "sidebar-changed-state-host";
+
     this.bookmarksSettings = document.createElement("div");
     this.bookmarksSettings.className = "sidebar-bookmarks-settings";
     const settingRow = document.createElement("label");
@@ -314,15 +388,32 @@ export class SidebarPanel {
 
     this.browseScroll.append(this.browseList);
     this.bookmarksScroll.append(this.bookmarksList);
+
+    this.changedScroll = document.createElement("div");
+    this.changedScroll.className = "sidebar-changed-scroll";
+    this.changedList = document.createElement("ul");
+    this.changedList.className = "inbox-list inbox-list--virtual changed-list";
+    this.changedList.setAttribute("role", "list");
+    this.changedEmpty = document.createElement("p");
+    this.changedEmpty.className = "inbox-empty sidebar-changed-empty";
+    this.changedScroll.append(this.changedList);
+    this.changedScroll.hidden = true;
+
     this.browseBody.append(
       toolbar,
       filterRow,
+      this.changedToolbar,
+      this.changedScopeHost,
+      this.changedErrorHost,
+      this.changedStateHost,
       this.bookmarksSettings,
       this.hintHost,
       this.browseScroll,
       this.browseEmpty,
       this.bookmarksScroll,
       this.bookmarksEmpty,
+      this.changedScroll,
+      this.changedEmpty,
     );
 
     this.browseSection.append(this.browseHeader, this.browseBody);
@@ -373,6 +464,22 @@ export class SidebarPanel {
       },
     );
 
+    this.changedVirtual = new VirtualList<ChangedRow>(
+      this.changedList,
+      this.changedScroll,
+      {
+        createRow: createChangedRow,
+        bindRow: (row, item) =>
+          bindChangedRow(row, item, this.state.now, (activated) =>
+            this.options.onChangedActivate(activated),
+          ),
+        rowHeight: 56,
+        rowSelector: ".changed-row",
+        activationSelector: ".changed-row-main",
+        viewportHeight: options.viewportHeight,
+      },
+    );
+
     this.bindEvents();
   }
 
@@ -400,6 +507,7 @@ export class SidebarPanel {
   refresh(): void {
     this.virtual.refresh();
     this.bookmarksVirtual.refresh();
+    this.changedVirtual.refresh();
     this.browser?.refresh();
   }
 
@@ -413,10 +521,11 @@ export class SidebarPanel {
   destroy(): void {
     this.virtual.destroy();
     this.bookmarksVirtual.destroy();
+    this.changedVirtual.destroy();
     this.browser?.destroy();
   }
 
-  private modeButton(mode: BrowseMode, label: string): HTMLButtonElement {
+  private modeButton(mode: BrowseView, label: string): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "sidebar-mode";
@@ -555,7 +664,10 @@ export class SidebarPanel {
         : undefined;
       if (!row || item === undefined) return;
       event.preventDefault();
-      this.options.onDismiss(item.path, this.state.browseMode);
+      this.options.onDismiss(
+        item.path,
+        this.state.browseMode === "recent" ? "recent" : "all",
+      );
     });
 
     this.browseList.addEventListener("contextmenu", browseContextMenu);
@@ -678,6 +790,9 @@ export class SidebarPanel {
     this.undoBtn.addEventListener("click", () => this.options.onUndo());
     this.summaryBtn.addEventListener("click", () => this.options.onSummarize());
     this.popoutBtn.addEventListener("click", () => this.openPopout());
+    this.changedRefreshBtn.addEventListener("click", () =>
+      this.options.onRefreshChanged(),
+    );
   }
 
   private openPopout(): void {
@@ -780,7 +895,12 @@ export class SidebarPanel {
   }
 
   private browseItems(): InboxEntry[] {
-    if (this.state.browseMode === "bookmarks") return [];
+    if (
+      this.state.browseMode === "bookmarks" ||
+      this.state.browseMode === "changed"
+    ) {
+      return [];
+    }
     return this.state.browseMode === "recent"
       ? this.state.recent
       : this.state.inventory;
@@ -958,10 +1078,24 @@ export class SidebarPanel {
   private renderBrowseSection(): void {
     const isRecent = this.state.browseMode === "recent";
     const isBookmarks = this.state.browseMode === "bookmarks";
+    const isChanged = this.state.browseMode === "changed";
     const items = this.browseItems();
+    const changedRows = this.state.changedRows;
+    const changedFilteredEmpty =
+      isChanged &&
+      this.state.filterTerm.trim().length > 0 &&
+      changedRows.length === 0 &&
+      this.state.changed.status !== "loading" &&
+      this.state.changed.status !== "refreshing" &&
+      this.state.changed.status !== "scope-error" &&
+      this.state.changed.status !== "error";
 
     this.browseCount.textContent = String(
-      isBookmarks ? this.state.bookmarks.totalCount : items.length,
+      isChanged
+        ? changedRows.length
+        : isBookmarks
+          ? this.state.bookmarks.totalCount
+          : items.length,
     );
     this.browseHeader.setAttribute(
       "aria-expanded",
@@ -970,12 +1104,15 @@ export class SidebarPanel {
     this.browseSection.classList.toggle("collapsed", this.state.browseCollapsed);
     this.browseBody.hidden = this.state.browseCollapsed;
 
-    this.modeAll.classList.toggle("active", !isRecent && !isBookmarks);
+    const allActive = !isRecent && !isBookmarks && !isChanged;
+    this.modeAll.classList.toggle("active", allActive);
     this.modeRecent.classList.toggle("active", isRecent);
     this.modeBookmarks.classList.toggle("active", isBookmarks);
-    this.modeAll.setAttribute("aria-pressed", String(!isRecent && !isBookmarks));
+    this.modeChanged.classList.toggle("active", isChanged);
+    this.modeAll.setAttribute("aria-pressed", String(allActive));
     this.modeRecent.setAttribute("aria-pressed", String(isRecent));
     this.modeBookmarks.setAttribute("aria-pressed", String(isBookmarks));
+    this.modeChanged.setAttribute("aria-pressed", String(isChanged));
     this.modeBookmarksCount.textContent = String(this.state.bookmarks.totalCount);
     const total = this.state.bookmarks.totalCount;
     this.modeBookmarks.setAttribute(
@@ -988,7 +1125,9 @@ export class SidebarPanel {
     }
     this.filterInput.placeholder = isBookmarks
       ? "Filter bookmarks by document or heading"
-      : "Filter by name, folder or project";
+      : isChanged
+        ? "Filter changed `_ai` documents by name or project"
+        : "Filter by name, folder or project";
     this.filterClear.hidden = this.state.filterTerm.trim().length === 0;
     this.filterInput.setAttribute(
       "aria-describedby",
@@ -997,12 +1136,25 @@ export class SidebarPanel {
     this.filterCount.textContent =
       this.state.filterTerm.trim().length === 0
         ? ""
-        : `${isBookmarks ? this.state.bookmarks.rows.length : items.length} matching`;
+        : `${
+            isChanged
+              ? changedRows.length
+              : isBookmarks
+                ? this.state.bookmarks.rows.length
+                : items.length
+          } matching`;
 
-    this.clearBtn.hidden = isBookmarks;
-    this.undoBtn.hidden = isBookmarks;
-    this.summaryBtn.hidden = isBookmarks;
-    this.popoutBtn.hidden = isBookmarks;
+    const hideBrowseActions = isBookmarks || isChanged;
+    this.clearBtn.hidden = hideBrowseActions;
+    this.undoBtn.hidden = hideBrowseActions;
+    this.summaryBtn.hidden = hideBrowseActions;
+    this.popoutBtn.hidden = hideBrowseActions;
+    this.changedToolbar.hidden = !isChanged;
+    const changedBusy =
+      this.state.changed.status === "loading" ||
+      this.state.changed.status === "refreshing";
+    this.changedRefreshBtn.disabled = changedBusy;
+
     this.clearBtn.disabled = !isRecent || this.state.recent.length === 0;
     this.undoBtn.disabled = !this.state.canUndo;
     this.summaryBtn.disabled =
@@ -1021,21 +1173,92 @@ export class SidebarPanel {
         ? "No bookmarks yet, so no change notifications will appear."
         : "Popups are limited to bookmarked documents. The tray dot still reflects every change.";
 
-    this.browseScroll.hidden = isBookmarks;
+    this.browseScroll.hidden = isBookmarks || isChanged;
     this.bookmarksScroll.hidden = !isBookmarks;
-    this.hintHost.hidden = isBookmarks;
+    this.changedScroll.hidden = !isChanged;
+    this.hintHost.hidden = isBookmarks || isChanged;
 
     this.renderHint();
-    if (!isBookmarks) this.renderBrowseEmpty(items);
+    if (!isBookmarks && !isChanged) this.renderBrowseEmpty(items);
     else this.browseEmpty.hidden = true;
     this.renderBookmarksEmpty();
+    this.renderChangedSection(isChanged, changedFilteredEmpty);
+
     this.virtual.setItems(
-      this.state.browseCollapsed || isBookmarks ? [] : items,
+      this.state.browseCollapsed || isBookmarks || isChanged ? [] : items,
     );
     this.bookmarksVirtual.setItems(
       isBookmarks && !this.state.browseCollapsed
         ? this.state.bookmarks.rows
         : [],
+    );
+    this.changedVirtual.setItems(
+      isChanged && !this.state.browseCollapsed ? changedRows : [],
+    );
+  }
+
+  /** Paints the scope banner, repository errors and one explicit state. */
+  private renderChangedSection(
+    isChanged: boolean,
+    filteredEmpty: boolean,
+  ): void {
+    if (!isChanged) {
+      this.changedScopeHost.replaceChildren();
+      this.changedScopeHost.hidden = true;
+      this.changedErrorHost.replaceChildren();
+      this.changedErrorHost.hidden = true;
+      this.changedStateHost.replaceChildren();
+      this.changedStateHost.hidden = true;
+      this.changedEmpty.hidden = true;
+      this.changedScroll.setAttribute("aria-busy", "false");
+      return;
+    }
+
+    const state = this.state.changed;
+    const busy = state.status === "loading" || state.status === "refreshing";
+    this.changedScroll.setAttribute("aria-busy", String(busy));
+
+    if (state.scope !== null) {
+      this.changedScopeHost.replaceChildren(
+        createScopeBanner(state.scope, () =>
+          this.options.onShowAllChanged(),
+        ),
+      );
+      this.changedScopeHost.hidden = false;
+    } else {
+      this.changedScopeHost.replaceChildren();
+      this.changedScopeHost.hidden = true;
+    }
+
+    const errors = createRepositoryErrorBanner(state.repositories);
+    this.changedErrorHost.replaceChildren(errors);
+    this.changedErrorHost.hidden = errors.hidden;
+
+    if (filteredEmpty) {
+      this.changedStateHost.replaceChildren();
+      this.changedStateHost.hidden = true;
+      this.changedEmpty.hidden = false;
+      this.changedEmpty.replaceChildren();
+      const text = document.createElement("span");
+      text.textContent = `No documents match “${this.state.filterTerm.trim()}”.`;
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "sidebar-inline-action";
+      clear.textContent = "Clear filter";
+      clear.addEventListener("click", () => {
+        this.filterInput.value = "";
+        this.options.onFilterChange("");
+      });
+      this.changedEmpty.append(text, clear);
+      return;
+    }
+
+    this.changedEmpty.hidden = true;
+    this.changedStateHost.hidden = false;
+    this.changedStateHost.replaceChildren(
+      createStatePanel(state, {
+        onShowAll: () => this.options.onShowAllChanged(),
+      }),
     );
   }
 

@@ -67,3 +67,27 @@ describe("shortcut reference", () => {
     }
   });
 });
+
+describe("Changed `_ai` shortcut group", () => {
+  it("lists the refresh chord and row activation", () => {
+    const groups = buildShortcutReference("other");
+    const group = groups.find((candidate) => candidate.id === "changed-ai");
+    expect(group).toBeDefined();
+    expect(group!.title).toBe("Changed `_ai`");
+
+    const refresh = entryById(groups, "refresh-changed");
+    expect(refresh?.keys).toEqual(["Ctrl+Shift+R"]);
+    expect(refresh?.description.length).toBeGreaterThan(0);
+
+    const activate = entryById(groups, "activate-changed-row");
+    expect(activate?.keys).toEqual(["Enter", "Space"]);
+    expect(activate?.description.length).toBeGreaterThan(0);
+  });
+
+  it("uses the macOS modifier for the refresh chord", () => {
+    const mac = buildShortcutReference("mac");
+    expect(entryById(mac, "refresh-changed")?.keys).toEqual([
+      "Cmd+Shift+R",
+    ]);
+  });
+});

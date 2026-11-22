@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { filterEntries } from "./filter-documents";
+import type { ChangedRow } from "./changed-ai-model";
 import type { InboxEntry } from "./inbox-model";
 
 function entry(path: string): InboxEntry {
@@ -86,5 +87,52 @@ describe("filterEntries", () => {
 
     expect(matches).toHaveLength(1);
     expect(elapsed).toBeLessThan(250);
+  });
+});
+
+function changedRow(path: string): ChangedRow {
+  return {
+    path,
+    filename: path.split("/").pop() ?? path,
+    project: "docdeck",
+    context: path.split("_ai/").pop() ?? path,
+    staged: false,
+    unstaged: true,
+    untracked: false,
+    modifiedTime: 1_000,
+    repositoryRoot: "/devel/docdeck",
+  };
+}
+
+describe("filterEntries over changed rows", () => {
+  const rows = [
+    changedRow("/devel/docdeck/_ai/backlog/plan.md"),
+    changedRow("/devel/shop/_ai/report.md"),
+    changedRow("/devel/docdeck/_ai/backlog/notes.md"),
+  ];
+
+  it("narrows by filename, full path and _ai project without reordering", () => {
+    expect(filterEntries(rows, "plan").map((row) => row.filename)).toEqual([
+      "plan.md",
+    ]);
+    expect(
+      filterEntries(rows, "/devel/shop").map((row) => row.filename),
+    ).toEqual(["report.md"]);
+    expect(filterEntries(rows, "docdeck").map((row) => row.filename)).toEqual([
+      "plan.md",
+      "notes.md",
+    ]);
+  });
+
+  it("leaves the input order intact", () => {
+    const matches = filterEntries(rows, "docdeck");
+    expect(matches.map((row) => row.path)).toEqual([
+      rows[0].path,
+      rows[2].path,
+    ]);
+  });
+
+  it("returns an empty list for a term that matches nothing", () => {
+    expect(filterEntries(rows, "zzz-nothing")).toEqual([]);
   });
 });

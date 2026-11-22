@@ -38,6 +38,7 @@ export const FIXED_SHORTCUTS: readonly ShortcutDefinition[] = Object.freeze([
   { id: "reopen-tab", key: "t", modifier: "ctrlOrCmd", shift: true },
   { id: "toggle-log", key: "`", modifier: "ctrlOrCmd", shift: false },
   { id: "find", key: "f", modifier: "ctrlOrCmd", shift: false },
+  { id: "refresh-changed", key: "r", modifier: "ctrlOrCmd", shift: true },
 ]);
 
 export function shortcutById(id: string): ShortcutDefinition | undefined {

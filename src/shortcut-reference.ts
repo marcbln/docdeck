@@ -84,6 +84,18 @@ export function buildShortcutReference(
       ],
     },
     {
+      id: "changed-ai",
+      title: "Changed `_ai`",
+      entries: [
+        registered("refresh-changed", "Refresh the Changed `_ai` view"),
+        literal(
+          "activate-changed-row",
+          ["Enter", "Space"],
+          "Open the highlighted changed document",
+        ),
+      ],
+    },
+    {
       id: "panels",
       title: "Panels and help",
       entries: [

@@ -3,16 +3,20 @@
 //!
 //! Zed's CLI uses the same sequence (`boot_background` in `crates/cli/src/main.rs`):
 //! fork, call `setsid()` in the child, and detach stdio before continuing.
-//! Release builds detach only when started from a terminal; debug builds and
-//! `DOCDECK_FOREGROUND=1` stay attached so `tauri dev` and Ctrl-C work normally.
+//! Release builds detach when started from a terminal, and also when a changed
+//! view was requested — an agent invocation has no terminal but must return
+//! promptly. Debug builds and `DOCDECK_FOREGROUND=1` stay attached so `tauri dev`
+//! and Ctrl-C work normally.
 
 pub const FOREGROUND_ENV: &str = "DOCDECK_FOREGROUND";
 
-pub fn detach_from_terminal() {
+/// `changed_requested` is true when this launch carried `--changed`.
+pub fn detach_from_terminal(changed_requested: bool) {
     if !should_detach(
         cfg!(debug_assertions),
         std::env::var_os(FOREGROUND_ENV).is_some(),
         terminal_attached(),
+        changed_requested,
     ) {
         return;
     }
@@ -41,8 +45,13 @@ pub fn detach_from_terminal() {
     }
 }
 
-fn should_detach(debug_build: bool, foreground_env: bool, terminal_attached: bool) -> bool {
-    !debug_build && !foreground_env && terminal_attached
+fn should_detach(
+    debug_build: bool,
+    foreground_env: bool,
+    terminal_attached: bool,
+    changed_requested: bool,
+) -> bool {
+    !debug_build && !foreground_env && (terminal_attached || changed_requested)
 }
 
 #[cfg(unix)]
@@ -76,10 +85,18 @@ mod tests {
     use super::should_detach;
 
     #[test]
-    fn detaches_only_release_builds_from_a_terminal() {
-        assert!(should_detach(false, false, true));
-        assert!(!should_detach(true, false, true));
-        assert!(!should_detach(false, true, true));
-        assert!(!should_detach(false, false, false));
+    fn detaches_only_release_builds() {
+        assert!(should_detach(false, false, true, false));
+        assert!(!should_detach(true, false, true, false));
+        assert!(!should_detach(false, true, true, false));
+        assert!(!should_detach(false, false, false, false));
+    }
+
+    #[test]
+    fn a_changed_view_detaches_without_a_terminal() {
+        assert!(should_detach(false, false, false, true));
+        // Debug builds and the foreground override keep their terminal.
+        assert!(!should_detach(true, false, false, true));
+        assert!(!should_detach(false, true, false, true));
     }
 }

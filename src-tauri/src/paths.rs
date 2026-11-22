@@ -19,6 +19,20 @@ pub struct CliEntry {
     pub is_dir: bool,
 }
 
+/// One parsed command line: documents/folders to open, an optional changed-view
+/// scope, and the warnings to print before stdio is detached.
+///
+/// `startup_paths`, `startup_changed_scope` and the single-instance callback all
+/// use [`parse_cli`], so they cannot disagree about what opens and what scopes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliRequest {
+    pub entries: Vec<CliEntry>,
+    /// Absolute scope path, or `None` when `--changed` was not supplied.
+    pub changed: Option<String>,
+    pub warnings: Vec<String>,
+}
+
 /// Directory names that are never traversed or surfaced, whatever a selector
 /// says. `~/devel/*` would otherwise walk every build tree on a fresh config.
 ///
@@ -321,8 +335,10 @@ pub fn modified_millis(path: &Path) -> Option<u64> {
 /// launch, but the *second* shell's directory when the single-instance plugin
 /// forwards a command line, so `docdeck README.md` opens the file the caller
 /// meant instead of one relative to the already-running window.
+/// Convenience wrapper used by tests; production reads [`parse_cli`] directly.
+#[allow(dead_code)]
 pub fn classify_args(args: &[String], cwd: &Path) -> Vec<CliEntry> {
-    classify_args_with_warnings(args, cwd).0
+    parse_cli(args, cwd).entries
 }
 
 /// Like [`classify_args`], but also reports each path argument that did not
@@ -330,16 +346,62 @@ pub fn classify_args(args: &[String], cwd: &Path) -> Vec<CliEntry> {
 ///
 /// The caller prints the warnings *before* [`crate::detach`] redirects stdio,
 /// otherwise a typo in a shell command would silently open nothing.
+#[allow(dead_code)]
 pub fn classify_args_with_warnings(args: &[String], cwd: &Path) -> (Vec<CliEntry>, Vec<String>) {
-    let mut entries = Vec::new();
+    let request = parse_cli(args, cwd);
+    (request.entries, request.warnings)
+}
+
+/// Parses the whole command line, including the additive `--changed [path]`
+/// flag.
+///
+/// Rules:
+/// - `--changed=<path>` sets the scope from the value.
+/// - `--changed` consumes the immediately following argument as its scope when
+///   that argument does not start with `-`; otherwise no scope is set. A bare
+///   trailing `--changed` scopes to `cwd`.
+/// - A consumed scope path is never also classified as a document or folder.
+/// - Other flag-style arguments are ignored, as before.
+/// - Multiple `--changed` flags: the last one that supplied a value wins.
+/// - A relative scope resolves against `cwd`; an unresolvable scope is forwarded
+///   as the absolute joined path with a warning.
+pub fn parse_cli(args: &[String], cwd: &Path) -> CliRequest {
+    let mut changed: Option<String> = None;
+    let mut positionals: Vec<&str> = Vec::new();
     let mut warnings = Vec::new();
 
-    for arg in args
-        .iter()
-        .skip(1)
-        .map(String::as_str)
-        .filter(|arg| !arg.starts_with('-'))
-    {
+    let mut index = 1;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if let Some(value) = arg.strip_prefix("--changed=") {
+            changed = Some(resolve_scope(value, cwd, &mut warnings));
+        } else if arg == "--changed" {
+            match args.get(index + 1).map(String::as_str) {
+                Some(value) if !value.starts_with('-') => {
+                    changed = Some(resolve_scope(value, cwd, &mut warnings));
+                    index += 1;
+                }
+                Some(_) => {
+                    // A following flag is never a path. `--changed --quit`
+                    // therefore leaves no scope while `--quit` keeps precedence.
+                    changed = None;
+                }
+                None => {
+                    changed = Some(resolve_scope(
+                        cwd.to_string_lossy().as_ref(),
+                        cwd,
+                        &mut warnings,
+                    ));
+                }
+            }
+        } else if !arg.starts_with('-') {
+            positionals.push(arg);
+        }
+        index += 1;
+    }
+
+    let mut entries = Vec::new();
+    for arg in positionals {
         let arg_path = Path::new(arg);
         let candidate = if arg_path.is_absolute() {
             arg_path.to_path_buf()
@@ -355,5 +417,27 @@ pub fn classify_args_with_warnings(args: &[String], cwd: &Path) -> (Vec<CliEntry
         }
     }
 
-    (entries, warnings)
+    CliRequest {
+        entries,
+        changed,
+        warnings,
+    }
+}
+
+fn resolve_scope(value: &str, cwd: &Path, warnings: &mut Vec<String>) -> String {
+    let candidate = Path::new(value);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        cwd.join(candidate)
+    };
+    match joined.canonicalize() {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(error) => {
+            warnings.push(format!(
+                "cannot resolve changed scope {value}: {error}"
+            ));
+            joined.to_string_lossy().into_owned()
+        }
+    }
 }

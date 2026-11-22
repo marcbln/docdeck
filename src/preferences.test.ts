@@ -123,6 +123,22 @@ describe("loadPreferences", () => {
     expect(loadPreferences().browseMode).toBe("recent");
   });
 
+  it("rejects the transient changed mode and restores the saved default", () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        themeMode: "light",
+        browseMode: "changed",
+      }),
+    );
+
+    const preferences = loadPreferences();
+    expect(preferences.browseMode).toBe("recent");
+    // The transient mode never widens the persisted schema.
+    expect(preferences.themeMode).toBe("light");
+  });
+
   it("accepts the bookmarks browse mode", () => {
     window.localStorage.setItem(
       KEY,

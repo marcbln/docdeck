@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxEntry } from "./inbox-model";
 import type { OpenRow } from "./sidebar-model";
 import { SidebarPanel, type SidebarViewState } from "./sidebar-panel";
+import {
+  emptyChangedViewState,
+  type ChangedRow,
+  type ChangedViewState,
+} from "./changed-ai-model";
 import { addDocument, emptyCollection } from "./bookmarks-model";
 import { buildBookmarkView } from "./bookmarks-view";
 import type { SectionAnchor } from "./bookmarks-model";
@@ -72,6 +77,19 @@ function state(overrides: Partial<SidebarViewState> = {}): SidebarViewState {
     },
     bookmarkedPaths: new Set(),
     bookmarkNotificationsOnly: false,
+    changed: {
+      status: "idle",
+      rows: [],
+      repositories: [],
+      scope: null,
+      scopeError: null,
+      gitAvailable: true,
+      discoveryTruncated: false,
+      watchedRoots: 0,
+      aiFolders: 0,
+      loadedAt: null,
+    },
+    changedRows: [],
     now: NOW,
     ...overrides,
   };
@@ -95,6 +113,9 @@ function mount(next: SidebarViewState = state()): {
   onSectionRemove: ReturnType<typeof vi.fn>;
   onSectionReanchor: ReturnType<typeof vi.fn>;
   onBookmarkNotificationsChange: ReturnType<typeof vi.fn>;
+  onChangedActivate: ReturnType<typeof vi.fn>;
+  onRefreshChanged: ReturnType<typeof vi.fn>;
+  onShowAllChanged: ReturnType<typeof vi.fn>;
 } {
   document.body.innerHTML = '<aside id="sidebar"></aside>';
   const root = document.getElementById("sidebar") as HTMLElement;
@@ -113,6 +134,9 @@ function mount(next: SidebarViewState = state()): {
   const onSectionRemove = vi.fn();
   const onSectionReanchor = vi.fn();
   const onBookmarkNotificationsChange = vi.fn();
+  const onChangedActivate = vi.fn();
+  const onRefreshChanged = vi.fn();
+  const onShowAllChanged = vi.fn();
   const panel = new SidebarPanel(root, {
     onOpen,
     onClose,
@@ -128,6 +152,9 @@ function mount(next: SidebarViewState = state()): {
     onSectionRemove,
     onSectionReanchor,
     onBookmarkNotificationsChange,
+    onChangedActivate,
+    onRefreshChanged,
+    onShowAllChanged,
     onToggleSection,
     onContextMenu: vi.fn(),
     now: () => NOW,
@@ -153,6 +180,9 @@ function mount(next: SidebarViewState = state()): {
     onSectionRemove,
     onSectionReanchor,
     onBookmarkNotificationsChange,
+    onChangedActivate,
+    onRefreshChanged,
+    onShowAllChanged,
   };
 }
 
@@ -918,5 +948,269 @@ describe("SidebarPanel", () => {
     expect(row.querySelector(".bookmark-unavailable-badge")?.textContent).toBe(
       "Unavailable",
     );
+  });
+});
+function changedRow(
+  path: string,
+  overrides: Partial<ChangedRow> = {},
+): ChangedRow {
+  return {
+    path,
+    filename: path.split("/").pop() ?? path,
+    project: "docdeck",
+    context: path.split("_ai/").pop() ?? path,
+    staged: false,
+    unstaged: true,
+    untracked: false,
+    modifiedTime: NOW - 60_000,
+    repositoryRoot: "/devel/docdeck",
+    ...overrides,
+  };
+}
+
+function changedState(
+  overrides: Partial<ChangedViewState> = {},
+): ChangedViewState {
+  return { ...emptyChangedViewState(), status: "ready", ...overrides };
+}
+
+describe("SidebarPanel Changed `_ai` mode", () => {
+  it("adds a fourth mode button with an exclusive pressed state", () => {
+    const { root, onModeChange } = mount();
+
+    const buttons = [
+      ...root.querySelectorAll<HTMLButtonElement>(".sidebar-mode"),
+    ];
+    expect(buttons.map((button) => button.dataset.mode)).toEqual([
+      "all",
+      "recent",
+      "bookmarks",
+      "changed",
+    ]);
+
+    const changed = root.querySelector<HTMLButtonElement>(
+      '[data-mode="changed"]',
+    )!;
+    expect(changed.textContent).toContain("Changed `_ai`");
+    expect(changed.getAttribute("aria-label")).toBe(
+      "Changed `_ai` documents",
+    );
+
+    changed.click();
+    expect(onModeChange).toHaveBeenCalledWith("changed");
+  });
+
+  it("moves aria-pressed exclusively to the changed mode", () => {
+    const { root } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState(),
+        changedRows: [changedRow("/devel/docdeck/_ai/plan.md")],
+      }),
+    );
+
+    const pressed = [
+      ...root.querySelectorAll<HTMLButtonElement>(".sidebar-mode"),
+    ].filter((button) => button.getAttribute("aria-pressed") === "true");
+    expect(pressed.map((button) => button.dataset.mode)).toEqual(["changed"]);
+  });
+
+  it("paints changed rows and follows the filtered count", () => {
+    const rows = [
+      changedRow("/devel/docdeck/_ai/backlog/plan.md"),
+      changedRow("/devel/shop/_ai/report.md", { project: "shop" }),
+    ];
+    const { root } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({ rows }),
+        changedRows: rows.slice(0, 1),
+      }),
+    );
+
+    expect(root.querySelectorAll(".changed-row")).toHaveLength(1);
+    expect(root.querySelector(".project-chip")?.textContent).toBe("docdeck");
+    expect(
+      root.querySelector(".sidebar-section--browse .sidebar-section-count")
+        ?.textContent,
+    ).toBe("1");
+  });
+
+  it("hides Clear, Undo, Summarize, Popout and bookmark settings", () => {
+    const { root, onOpen } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({ rows: [] }),
+        changedRows: [],
+      }),
+    );
+
+    for (const action of ["clear", "undo", "summary", "popout"]) {
+      expect(
+        root.querySelector<HTMLElement>(
+          `.sidebar-action[data-action="${action}"]`,
+        )?.hidden,
+      ).toBe(true);
+    }
+    expect(
+      root.querySelector<HTMLElement>(".sidebar-bookmarks-settings")?.hidden,
+    ).toBe(true);
+    expect(
+      root.querySelector<HTMLElement>(".sidebar-changed-toolbar")?.hidden,
+    ).toBe(false);
+    // Painting the view never opens a document.
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("activates one row without leaving the mode or removing the row", () => {
+    const item = changedRow("/devel/docdeck/_ai/backlog/plan.md");
+    const { root, onChangedActivate } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({ rows: [item] }),
+        changedRows: [item],
+      }),
+    );
+
+    root.querySelector<HTMLButtonElement>(".changed-row-main")!.click();
+
+    expect(onChangedActivate).toHaveBeenCalledTimes(1);
+    expect(onChangedActivate).toHaveBeenCalledWith(item);
+    expect(root.querySelectorAll(".changed-row")).toHaveLength(1);
+    expect(
+      root
+        .querySelector('[data-mode="changed"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("renders the state panel, busy flag and Refresh control", () => {
+    const { root, panel, onRefreshChanged } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({
+          status: "loading",
+          rows: [],
+          watchedRoots: 2,
+        }),
+        changedRows: [],
+      }),
+    );
+
+    const statePanel = root.querySelector<HTMLElement>(".changed-state-panel");
+    expect(statePanel?.getAttribute("role")).toBe("status");
+    expect(statePanel?.getAttribute("aria-live")).toBe("polite");
+    expect(
+      root
+        .querySelector(".sidebar-changed-scroll")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+
+    // Once the report arrives the control is enabled and still routed.
+    panel.render(
+      state({
+        browseMode: "changed",
+        changed: changedState(),
+        changedRows: [changedRow("/devel/docdeck/_ai/plan.md")],
+      }),
+    );
+    const refresh = root.querySelector<HTMLButtonElement>(
+      '[data-action="refresh-changed"]',
+    )!;
+    expect(refresh.getAttribute("aria-label")).toBe(
+      "Refresh changed `_ai` documents",
+    );
+    refresh.click();
+    expect(onRefreshChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("names every failing repository with its reason", () => {
+    const { root } = mount(
+      state({
+        browseMode: "changed",
+        changedRows: [changedRow("/devel/alpha/_ai/a.md")],
+        changed: changedState({
+          status: "partial",
+          rows: [changedRow("/devel/alpha/_ai/a.md")],
+          repositories: [
+            {
+              root: "/devel/alpha",
+              documents: [],
+              error: null,
+              errorCode: null,
+            },
+            {
+              root: "/devel/beta",
+              documents: [],
+              error: "git status timed out",
+              errorCode: "timeout",
+            },
+          ],
+        }),
+      }),
+    );
+
+    const lines = [...root.querySelectorAll(".changed-repo-error")];
+    expect(lines).toHaveLength(1);
+    expect(lines[0].textContent).toContain("/devel/beta");
+    expect(lines[0].textContent).toContain("git status timed out");
+  });
+
+  it("shows the scope banner and routes its return action", () => {
+    const { root, onShowAllChanged } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({
+          status: "empty",
+          rows: [],
+          scope: { requested: "/devel/beta", repository: "/devel/beta" },
+        }),
+      }),
+    );
+
+    const banner = root.querySelector<HTMLElement>(".changed-scope-banner");
+    expect(banner).not.toBeNull();
+    expect(banner!.textContent).toContain("beta");
+    expect(banner!.textContent).toContain("/devel/beta");
+
+    root.querySelector<HTMLButtonElement>(".changed-scope-show-all")!.click();
+    expect(onShowAllChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the shared no-match copy when the filter hides every row", () => {
+    const hidden = changedRow("/devel/docdeck/_ai/backlog/plan.md");
+    const { root } = mount(
+      state({
+        browseMode: "changed",
+        filterTerm: "zzz",
+        changed: changedState({ rows: [hidden] }),
+        changedRows: [],
+      }),
+    );
+
+    const empty = root.querySelector<HTMLElement>(".sidebar-changed-empty");
+    expect(empty?.hidden).toBe(false);
+    expect(empty?.textContent).toContain("No documents match “zzz”.");
+    expect(
+      root.querySelector<HTMLElement>(".changed-state-panel"),
+    ).toBeNull();
+  });
+
+  it("renders a scoped row outside the watch set with a usable path", () => {
+    const outside = changedRow("/devel/other/_ai/plan.md", {
+      project: "other",
+      repositoryRoot: "/devel/other",
+    });
+    const { root, onChangedActivate } = mount(
+      state({
+        browseMode: "changed",
+        changed: changedState({ rows: [outside] }),
+        changedRows: [outside],
+      }),
+    );
+
+    root.querySelector<HTMLButtonElement>(".changed-row-main")!.click();
+    expect(onChangedActivate).toHaveBeenCalledWith(outside);
+    expect(outside.path).toBe("/devel/other/_ai/plan.md");
   });
 });

@@ -2,6 +2,7 @@
 
 mod clipboard;
 mod bookmark_filter;
+mod changed_ai;
 mod commands;
 mod config;
 mod config_edit;
@@ -21,6 +22,8 @@ mod watcher;
 mod clipboard_test;
 #[cfg(test)]
 mod bookmark_filter_test;
+#[cfg(test)]
+mod changed_ai_test;
 #[cfg(test)]
 mod commands_test;
 #[cfg(test)]
@@ -63,7 +66,25 @@ use watcher::WatcherState;
 #[tauri::command]
 fn startup_paths() -> Vec<CliEntry> {
     let cwd = env::current_dir().unwrap_or_default();
-    paths::classify_args(&env::args().collect::<Vec<_>>(), &cwd)
+    paths::parse_cli(&env::args().collect::<Vec<_>>(), &cwd).entries
+}
+
+/// Returns the absolute `--changed` scope this process was launched with.
+///
+/// Uses the same parser as `startup_paths` and the single-instance callback, so
+/// the startup view and a forwarded invocation cannot disagree.
+#[tauri::command]
+fn startup_changed_scope() -> Option<String> {
+    let cwd = env::current_dir().unwrap_or_default();
+    paths::parse_cli(&env::args().collect::<Vec<_>>(), &cwd).changed
+}
+
+/// Payload of the `changed-ai-cli` event emitted for a second invocation.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangedAiCliPayload {
+    /// Absolute scope path; `None` only if the parser could not resolve one.
+    path: Option<String>,
 }
 
 /// Cancels every webview navigation that leaves docdeck's own origin.
@@ -106,11 +127,14 @@ pub fn run() {
         // terminal. `detach_from_terminal` redirects stdio to /dev/null, so doing
         // this afterwards would swallow the message along with the typo.
         let cwd = env::current_dir().unwrap_or_default();
-        for warning in paths::classify_args_with_warnings(&argv, &cwd).1 {
+        let request = paths::parse_cli(&argv, &cwd);
+        for warning in &request.warnings {
             eprintln!("[docdeck] {warning}");
         }
 
-        detach::detach_from_terminal();
+        // A changed view requested without a terminal (an agent tool) must
+        // return promptly, so release builds detach even without a tty.
+        detach::detach_from_terminal(request.changed.is_some());
 
         // Must happen before any window exists: WebKitGTK reads these once, while
         // it initialises, so setting them later has no effect.
@@ -135,10 +159,16 @@ pub fn run() {
 
         // Forward `docdeck path/to/doc.md` or `docdeck ./_ai` from a second
         // shell into the running window. Relative arguments belong to *that*
-        // shell's working directory, which is `cwd` here — not ours.
-        for entry in paths::classify_args(&argv, Path::new(&cwd)) {
+        // shell's working directory, which is `cwd` here — not ours. The same
+        // parse also carries `--changed [path]`.
+        let request = paths::parse_cli(&argv, Path::new(&cwd));
+        if let Some(path) = request.changed {
+            let _ = app.emit("changed-ai-cli", ChangedAiCliPayload { path: Some(path) });
+        }
+        for entry in request.entries {
             let _ = app.emit("open-path-cli", entry);
         }
+        // Focus even when only the changed flag arrived (FR-012).
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.show();
             let _ = window.unminimize();
@@ -225,7 +255,9 @@ pub fn run() {
             commands::resolve_document_link,
             commands::summary_status,
             commands::summarize_changes,
-            startup_paths
+            changed_ai::list_changed_ai_documents,
+            startup_paths,
+            startup_changed_scope
         ])
         .build(tauri::generate_context!())
         .expect("error while building docdeck application")

@@ -9,6 +9,16 @@ import type { InboxEntry } from "./inbox-model";
 
 export type BrowseMode = "all" | "recent" | "bookmarks";
 
+/**
+ * A browse mode that can be shown this session.
+ *
+ * `"changed"` is transient: it can be selected, painted, refreshed and left,
+ * but it is never written to preferences and never restored on restart. Keeping
+ * it out of `BrowseMode` makes the persisted contract impossible to widen by
+ * accident (FR-009).
+ */
+export type BrowseView = BrowseMode | "changed";
+
 /** The subset of a tab the Open Documents list needs. */
 export interface TabLike {
   path: string;

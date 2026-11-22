@@ -41,6 +41,16 @@ docdeck plans/refactor_plan.md reports/agent_status.md
   without changing order or any open/unread/deleted state. In **Bookmarks**, the
   same field matches documents and heading text; a heading-only match keeps its
   document visible as a container.
+- **Changed `_ai`** — a transient fourth browse mode lists every uncommitted
+  `_ai` Markdown document across the watched repositories, newest modification
+  first, with a project chip, `_ai`-relative context, staged/unstaged/new badges
+  and a relative time. Activating a row opens or focuses that one document; the
+  view never bulk-opens, never dismisses, bookmarks or acknowledges anything,
+  and never changes the saved browse mode. `docdeck --changed [path]` scopes the
+  view to the repository containing `path` (the caller's directory by default)
+  in the window that is already running, or starts it in the background.
+  `Ctrl`/`Cmd`+`Shift`+`R` refreshes it. Repository state is read-only: only
+  `git status` runs, with no locks and no shell.
 - **Rename and move tracking** — a rename or move inside watched locations
   updates one row in place, keeping the document open, active and read. A move
   out of every watch leaves the list and marks an open tab unavailable; a move
@@ -240,6 +250,12 @@ docdeck ./reports/agent_status.md
 
 # Add a folder to this session's watches
 docdeck ./_ai
+
+# Show uncommitted _ai documents in the running window
+docdeck --changed
+
+# Scope that view to the repository containing a path
+docdeck --changed ~/devel/other/_ai/plan.md
 ```
 
 ## Help
@@ -451,10 +467,12 @@ first launch and one bad entry never discards the rest. Bookmarks use
 `docdeck.bookmarks.v1` (`{ version: 1, documents, sections }`) with per-entry
 validation: a corrupt key starts empty, a bad entry is dropped while valid
 siblings survive, and section resolution status is never persisted. The browse
-filter, Recently changed activity and all session state are not persisted. Clear
-the preferences key to reset the appearance defaults (dark theme, outline
-hidden, frontmatter shown, browse shown in Recently changed mode, both sections
-expanded).
+filter, Recently changed activity and all session state are not persisted. The
+**Changed `_ai`** view, its rows, scope and filter are session-only and restart
+returns to the saved browse mode; `browseMode: "changed"` is rejected as an
+invalid stored value. Clear the preferences key to reset the appearance
+defaults (dark theme, outline hidden, frontmatter shown, browse shown in
+Recently changed mode, both sections expanded).
 
 ## Development
 

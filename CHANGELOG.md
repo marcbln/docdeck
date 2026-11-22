@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Changed `_ai` view**: a transient fourth browse mode lists every uncommitted
+  `_ai` Markdown document across watched repositories, newest first, with a
+  project chip, `_ai`-relative context, staged/unstaged/new badges and relative
+  time. Activating a row opens or focuses that document; the view never opens
+  documents in bulk, never dismisses, bookmarks or acknowledges anything, and
+  never changes the saved browse mode. Repository state is read-only: one
+  supervised `git status --porcelain=v1 -z` per work tree, with no shell and no
+  optional index refresh. Loading, empty, no-repository, partial, scope-error and
+  git-missing states are explicit and screen-reader announced.
+- **`docdeck --changed [path]`**: rescopes the running window (or starts it in
+  the background on a release build without a terminal) to the repository
+  containing `path`, or to the caller's directory when omitted. It never opens a
+  document by itself and never creates a second instance.
+- **`Ctrl`/`Cmd`+`Shift`+`R`** refreshes the changed view (switching to it when
+  another browse mode is showing), also available as a toolbar **Refresh**
+  button and listed in the shortcut reference.
 - **Keyboard help and bundled manual**: `?` (or the new **? Help** header
   button) opens a grouped shortcut reference and a Manual tab rendered from
   `docs/manual.md`. The reference is generated from the application's shortcut

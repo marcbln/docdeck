@@ -23,6 +23,7 @@ changed decision is a new ADR that supersedes the old one.
 | [261103-2](ADR__261103-2__rig-summary-agent-with-session-snapshots.md) | Change summaries use a Rig agent over session snapshots and TOC tools | Accepted | 2026-11-03 |
 | [261106-1](ADR__261106-1__session-event-log-and-resizable-panes.md) | Session event log, single window-title permission and persisted pane layout | Accepted | 2026-11-06 |
 | [261115-1](ADR__261115-1__webview-owned-bookmarks-with-context-anchors.md) | Webview-owned bookmarks with context anchors and a metadata-only notification filter | Accepted | 2026-11-15 |
+| [261122-1](ADR__261122-1__git-status-changed-ai-view.md) | Changed `_ai` view reads git status through a supervised subprocess and stays transient | Accepted | 2026-11-22 |
 
 ## Format
 

@@ -11,11 +11,16 @@ documents current without asking you to reload.
 - `docdeck <path>` in a second terminal adds that path to the window that is
   already running instead of starting another process.
 - `docdeck --quit` asks the running instance to exit without opening a window.
+- `docdeck --changed [path]` shows uncommitted `_ai` documents in the running
+  window, scoped to the repository containing `path` (or the caller's directory
+  when `path` is omitted). It never creates a second window and never opens a
+  document by itself.
 - The **Open documents** list at the top of the sidebar holds every open
   document. Activate a row to switch to it, close it with `×` or a middle-click,
   and right-click for **Copy path**, **Copy file** and bookmark actions.
-- The lower list switches between **All documents**, **Recently changed** and
-  **Bookmarks**. The filter field narrows the visible rows as you type.
+- The lower list switches between **All documents**, **Recently changed**,
+  **Bookmarks** and **Changed `_ai`**. The filter field narrows the visible rows
+  as you type.
 
 ## Reading
 
@@ -44,6 +49,19 @@ documents current without asking you to reload.
 - **Bookmarks** lists bookmarked documents and headings. A heading bookmark
   follows edits by text and surrounding headings; if the heading disappears, it
   is marked **Not found** and can be re-anchored from the current outline.
+- **Changed `_ai`** lists every uncommitted Markdown document under an `_ai`
+  segment across the watched repositories, newest modification first. Each row
+  shows its project, path context and **Staged**/**Unstaged**/**New** badges.
+  Activate one row to open or focus that document; the view itself never opens
+  documents, and it has no dismiss, star or unread control. The saved browse mode
+  is untouched: closing docdeck and reopening restores the previous mode.
+- A scoped launch (`docdeck --changed [path]`) shows a banner naming the
+  repository and offers **Show all watched repositories** in one action.
+- **Refresh** (or `Ctrl`/`Cmd`+`Shift`+`R`) re-reads git without moving tabs,
+  scroll positions, unread markers or bookmarks. A repository that cannot be
+  read is named with its reason while the others still list; git missing, empty,
+  no-repository and scope-error states each explain what happened. Only
+  `git status` is run, so the repository and its index are never modified.
 
 ## Clipboard
 
@@ -85,7 +103,8 @@ menus and the find bar.
 
 `Ctrl+W` closes the active document and leaves the application open;
 `Ctrl+Shift+T` reopens it. `Ctrl+W` is Ctrl-only on every platform, so on macOS
-`Cmd+W` remains the window action.
+`Cmd+W` remains the window action. `Ctrl`/`Cmd`+`Shift`+`R` refreshes
+**Changed `_ai`** (and switches to it when another browse mode is showing).
 
 ## When something looks wrong
 
@@ -99,3 +118,8 @@ menus and the find bar.
   these tools.
 - **Desktop notifications do not appear** — the desktop must provide a
   notification service. The tray presence dot still tracks changes.
+- **Changed `_ai` says git is missing** — install `git` and make sure it is on
+  `PATH`, then press **Refresh**. If one repository is named with an error while
+  others list rows, only that repository failed; the rest of the app still
+  works. A scope error names the requested path and offers **Show all watched
+  repositories**.

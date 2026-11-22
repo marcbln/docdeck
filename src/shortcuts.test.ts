@@ -138,3 +138,30 @@ describe("input guards", () => {
     expect(isModalOpen()).toBe(false);
   });
 });
+
+describe("changed view refresh shortcut", () => {
+  it("registers Ctrl+Shift+R and Cmd+Shift+R", () => {
+    const refresh = shortcutById("refresh-changed")!;
+    expect(refresh).toBeDefined();
+    expect(formatShortcut(refresh, "other")).toBe("Ctrl+Shift+R");
+    expect(formatShortcut(refresh, "mac")).toBe("Cmd+Shift+R");
+    expect(
+      matchesShortcut(key("r", { ctrlKey: true, shiftKey: true }), refresh),
+    ).toBe(true);
+    expect(
+      matchesShortcut(key("r", { metaKey: true, shiftKey: true }), refresh),
+    ).toBe(true);
+    expect(matchesShortcut(key("r", { ctrlKey: true }), refresh)).toBe(false);
+  });
+
+  it("does not collide with any other fixed shortcut", () => {
+    const refresh = shortcutById("refresh-changed")!;
+    for (const other of FIXED_SHORTCUTS) {
+      if (other.id === refresh.id) continue;
+      const sameKey = other.key.toLowerCase() === refresh.key.toLowerCase();
+      const sameModifier = other.modifier === refresh.modifier;
+      const sameShift = other.shift === refresh.shift;
+      expect(sameKey && sameModifier && sameShift).toBe(false);
+    }
+  });
+});
